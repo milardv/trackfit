@@ -1,5 +1,3 @@
-import React from "react";
-
 export function WorkoutScreen() {
     return (
         <div className="flex min-h-screen flex-col bg-background-dark pb-24">
@@ -8,7 +6,7 @@ export function WorkoutScreen() {
                 <button className="flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10">
                     <span className="material-symbols-outlined">arrow_back</span>
                 </button>
-                <h1 className="text-lg font-bold text-white">Delta R - Workout</h1>
+                <h1 className="text-lg font-bold text-white">Delta R - Seance</h1>
                 <button className="flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10">
                     <span className="material-symbols-outlined">more_horiz</span>
                 </button>
@@ -22,7 +20,7 @@ export function WorkoutScreen() {
                             <span className="text-3xl font-bold text-white">00</span>
                         </div>
                         <span className="text-xs font-bold tracking-wider text-text-secondary">
-              HOURS
+              HEURES
             </span>
                     </div>
                     <div className="flex flex-col items-center gap-2">
@@ -38,7 +36,7 @@ export function WorkoutScreen() {
                             <span className="text-3xl font-bold text-primary">42</span>
                         </div>
                         <span className="text-xs font-bold tracking-wider text-primary">
-              SECONDS
+              SECONDES
             </span>
                     </div>
                 </div>
@@ -55,17 +53,17 @@ export function WorkoutScreen() {
                     </div>
 
                     <div className="text-center">
-                        <h2 className="text-2xl font-bold text-white">Dumbbell Curl</h2>
+                        <h2 className="text-2xl font-bold text-white">Curl halteres</h2>
                         <p className="mt-1 text-text-secondary">
-                            <span className="text-white">12kg</span> • 5 series of 10
+                            <span className="text-white">12kg</span> • 5 series de 10
                         </p>
                     </div>
 
                     <div className="mt-2 w-full">
                         <div className="mb-2 flex justify-between text-sm font-bold">
-                            <span className="text-white">Progress</span>
+                            <span className="text-white">Progression</span>
                             <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                Set 2/5
+                Serie 2/5
               </span>
                         </div>
                         <div className="h-2 w-full overflow-hidden rounded-full bg-background-dark">
@@ -77,7 +75,7 @@ export function WorkoutScreen() {
                 {/* Session Log */}
                 <div className="flex flex-col gap-3">
                     <h3 className="text-sm font-bold tracking-wider text-text-secondary">
-                        SESSION LOG
+                        JOURNAL DE SEANCE
                     </h3>
 
                     {/* Completed Set */}
@@ -87,12 +85,12 @@ export function WorkoutScreen() {
                                 1
                             </div>
                             <div>
-                                <p className="font-bold text-text-secondary">10 Reps</p>
+                                <p className="font-bold text-text-secondary">10 reps</p>
                                 <p className="text-xs text-text-secondary/70">12kg</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-1 text-sm font-bold text-primary">
-                            Completed
+                            Terminee
                             <span
                                 className="material-symbols-outlined"
                                 style={{ fontSize: "16px" }}
@@ -110,14 +108,14 @@ export function WorkoutScreen() {
                                 2
                             </div>
                             <div>
-                                <p className="font-bold text-white">Current Set</p>
+                                <p className="font-bold text-white">Serie en cours</p>
                                 <p className="text-xs text-text-secondary">
-                                    Target: 10 Reps @ 12kg
+                                    Objectif: 10 reps @ 12kg
                                 </p>
                             </div>
                         </div>
                         <div className="flex items-center gap-1 text-sm font-bold text-text-secondary">
-                            In Progress
+                            En cours
                             <span
                                 className="material-symbols-outlined animate-spin"
                                 style={{ fontSize: "16px" }}
@@ -134,7 +132,7 @@ export function WorkoutScreen() {
                                 3
                             </div>
                             <div>
-                                <p className="font-bold text-text-secondary/50">Upcoming</p>
+                                <p className="font-bold text-text-secondary/50">A venir</p>
                             </div>
                         </div>
                     </div>
@@ -144,10 +142,10 @@ export function WorkoutScreen() {
                 <div className="mt-4 flex flex-col items-center gap-3">
                     <button className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 font-bold text-background-dark shadow-[0_0_20px_rgba(19,236,91,0.3)] text-lg">
                         <span className="material-symbols-outlined">timer</span>
-                        LOG SET & REST
+                        VALIDER SERIE + REPOS
                     </button>
                     <p className="text-xs text-text-secondary">
-                        Starts 60s rest timer automatically
+                        Lance automatiquement le repos de 60s
                     </p>
                 </div>
             </main>

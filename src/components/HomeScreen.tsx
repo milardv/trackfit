@@ -1,6 +1,25 @@
-import React from "react";
+interface HomeScreenProps {
+    displayName: string;
+    photoURL: string | null;
+}
 
-export function HomeScreen() {
+function getFirstName(displayName: string): string {
+    const trimmed = displayName.trim();
+    if (!trimmed) {
+        return "Sportif";
+    }
+    return trimmed.split(/\s+/)[0] ?? "Sportif";
+}
+
+function buildAvatarUrl(displayName: string): string {
+    const seed = encodeURIComponent(displayName || "TrackFit");
+    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}&backgroundColor=b6e3f4`;
+}
+
+export function HomeScreen({ displayName, photoURL }: HomeScreenProps) {
+    const firstName = getFirstName(displayName);
+    const avatarSrc = photoURL ?? buildAvatarUrl(displayName);
+
     return (
         <div className="flex flex-col gap-6 p-4 pb-24">
             {/* Header */}
@@ -8,36 +27,30 @@ export function HomeScreen() {
                 <div className="flex items-center gap-3">
                     <div className="h-12 w-12 overflow-hidden rounded-full border-2 border-primary bg-card-dark">
                         <img
-                            src="https://api.dicebear.com/7.x/avataaars/svg?seed=Alex&backgroundColor=b6e3f4"
-                            alt="Profile"
+                            src={avatarSrc}
+                            alt="Photo de profil"
                             className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
                         />
                     </div>
                     <div>
-                        <p className="text-sm text-text-secondary">Welcome back,</p>
-                        <h1 className="text-lg font-bold text-white">Alex Johnson</h1>
+                        <p className="text-sm text-text-secondary">Bienvenue, {firstName}</p>
+                        <h1 className="text-lg font-bold text-white">{displayName}</h1>
                     </div>
                 </div>
-                <button className="relative flex h-10 w-10 items-center justify-center rounded-full bg-card-dark text-white">
-                    <span className="material-symbols-outlined">notifications</span>
-                    <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary"></span>
-                </button>
             </header>
 
             {/* Today's Plan */}
             <section className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-2xl font-bold text-white">Today's Plan</h2>
-                    <span className="rounded-full bg-card-dark px-3 py-1 text-xs font-bold tracking-wider text-primary">
-            MONDAY
-          </span>
+                    <h2 className="text-2xl font-bold text-white">Plan du jour</h2>
                 </div>
 
                 <div className="relative overflow-hidden rounded-3xl bg-card-dark">
                     <div className="absolute inset-0">
                         <img
                             src="https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=1470&auto=format&fit=crop"
-                            alt="Gym"
+                            alt="Salle de sport"
                             className="h-full w-full object-cover opacity-40"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-background-dark via-background-dark/60 to-transparent"></div>
@@ -52,15 +65,15 @@ export function HomeScreen() {
                 fitness_center
               </span>
                             <span className="text-sm font-bold tracking-wider">
-                UPPER BODY
+                HAUT DU CORPS
               </span>
                         </div>
 
                         <div>
                             <h3 className="text-4xl font-bold text-white">Keep Cool</h3>
                             <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-                                Focus on endurance and flexibility. High volume, low intensity
-                                session to start the week.
+                                Focus sur l'endurance et la mobilite. Volume eleve, intensite
+                                moderee pour bien lancer la semaine.
                             </p>
                         </div>
 
@@ -86,23 +99,17 @@ export function HomeScreen() {
                                 </div>
                             </div>
 
-                            <button className="flex items-center gap-1 rounded-full bg-primary px-6 py-3 font-bold text-background-dark shadow-[0_0_20px_rgba(19,236,91,0.4)]">
-                                Start
-                                <span
-                                    className="material-symbols-outlined"
-                                    style={{ fontSize: "20px" }}
-                                >
-                  play_arrow
-                </span>
-                            </button>
-                        </div>
+                            <button className="bg-primary hover:bg-green-400 text-black font-bold py-2.5 px-6 rounded-full flex items-center gap-2 transition-transform active:scale-95 shadow-[0_0_15px_rgba(19,236,91,0.4)]">
+                                <span>Démarrer</span>
+                                <span className="material-symbols-outlined text-lg">play_arrow</span>
+                            </button>                        </div>
                     </div>
                 </div>
             </section>
 
             {/* Weekly Progress */}
             <section className="flex flex-col gap-4">
-                <h2 className="text-xl font-bold text-white">Weekly Progress</h2>
+                <h2 className="text-xl font-bold text-white">Progression hebdo</h2>
                 <div className="grid grid-cols-2 gap-4">
                     <div className="flex flex-col gap-4 rounded-2xl bg-card-dark p-5 border border-white/5">
                         <div className="flex items-center justify-between">
@@ -120,7 +127,7 @@ export function HomeScreen() {
               </span>
                         </div>
                         <div>
-                            <p className="text-sm text-text-secondary">Last Session</p>
+                            <p className="text-sm text-text-secondary">Derniere seance</p>
                             <p className="text-2xl font-bold text-white">
                                 45
                                 <span className="text-sm font-normal text-text-secondary">
@@ -150,11 +157,11 @@ export function HomeScreen() {
               </span>
                         </div>
                         <div>
-                            <p className="text-sm text-text-secondary">Total Volume</p>
+                            <p className="text-sm text-text-secondary">Volume total</p>
                             <p className="text-2xl font-bold text-white">
                                 12.5
                                 <span className="text-sm font-normal text-text-secondary">
-                  k lbs
+                  k kg
                 </span>
                             </p>
                         </div>
@@ -165,8 +172,8 @@ export function HomeScreen() {
             {/* Upcoming */}
             <section className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-bold text-white">Upcoming</h2>
-                    <button className="text-sm font-bold text-primary">View All</button>
+                    <h2 className="text-xl font-bold text-white">A venir</h2>
+                    <button className="text-sm font-bold text-primary">Voir tout</button>
                 </div>
 
                 <div className="flex flex-col gap-3">
@@ -174,14 +181,14 @@ export function HomeScreen() {
                         <div className="flex items-center gap-4">
                             <div className="flex flex-col items-center justify-center rounded-xl bg-background-dark px-4 py-2">
                 <span className="text-xs font-bold text-text-secondary">
-                  TUE
+                  MAR
                 </span>
                                 <span className="text-xl font-bold text-white">12</span>
                             </div>
                             <div>
-                                <h4 className="font-bold text-white">Leg Day Destruction</h4>
+                                <h4 className="font-bold text-white">Seance jambes</h4>
                                 <p className="text-sm text-text-secondary">
-                                    Squats, Lunges • 60 min
+                                    Squats, Fentes • 60 min
                                 </p>
                             </div>
                         </div>
@@ -199,14 +206,14 @@ export function HomeScreen() {
                         <div className="flex items-center gap-4">
                             <div className="flex flex-col items-center justify-center rounded-xl bg-background-dark px-4 py-2">
                 <span className="text-xs font-bold text-text-secondary">
-                  WED
+                  MER
                 </span>
                                 <span className="text-xl font-bold text-white">13</span>
                             </div>
                             <div>
-                                <h4 className="font-bold text-white">Active Recovery</h4>
+                                <h4 className="font-bold text-white">Recuperation active</h4>
                                 <p className="text-sm text-text-secondary">
-                                    Yoga, Stretching • 30 min
+                                    Yoga, Etirements • 30 min
                                 </p>
                             </div>
                         </div>

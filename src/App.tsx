@@ -1,25 +1,27 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { AppShell } from "./app/AppShell.tsx";
+import { AuthLoadingScreen } from "./features/auth/components/AuthLoadingScreen.tsx";
+import { LoginScreen } from "./features/auth/components/LoginScreen.tsx";
+import { useAuthSession } from "./features/auth/hooks/useAuthSession.ts";
 
 function App() {
-  const [count, setCount] = useState(0)
-    const [currentScreen, setCurrentScreen] = useState<Screen>("home");
+  const { user, isLoading, isSigningIn, authError, signIn, signOut } =
+    useAuthSession();
 
-  return (
-      <div className="min-h-screen bg-background-dark text-text-primary font-display">
-          {currentScreen === "home" && <HomeScreen />}
-          {currentScreen === "workout" && <WorkoutScreen />}
-          {currentScreen === "stats" && <StatsScreen />}
-          {currentScreen === "progress" && <ProgressScreen />}
+  if (isLoading) {
+    return <AuthLoadingScreen />;
+  }
 
-          <BottomNav
-              currentScreen={currentScreen}
-              setCurrentScreen={setCurrentScreen}
-          />
-      </div>
-  )
+  if (!user) {
+    return (
+      <LoginScreen
+        isLoading={isSigningIn}
+        errorMessage={authError}
+        onGoogleLogin={signIn}
+      />
+    );
+  }
+
+  return <AppShell user={user} authError={authError} onSignOut={signOut} />;
 }
 
-export default App
+export default App;

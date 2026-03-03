@@ -1,5 +1,35 @@
 # React + TypeScript + Vite
 
+## Deploiement GitHub Pages
+
+Le projet est configure pour un deploiement automatique vers GitHub Pages.
+
+### 1) Activer Pages dans le repo
+
+- GitHub > `Settings` > `Pages`
+- `Source`: **GitHub Actions**
+
+### 2) Push sur `main`
+
+Chaque push sur `main` lance le workflow:
+
+- `.github/workflows/deploy-pages.yml`
+
+Le build Vite detecte automatiquement le nom du repo et applique le bon `base` pour Pages.
+
+### 3) URL de production
+
+Apres le premier deploiement, l'app sera disponible sur:
+
+- `https://<username>.github.io/<repo>/`
+
+### Notes Firebase
+
+Si tu utilises Firebase Auth Google en production, ajoute aussi ce domaine dans:
+
+- Firebase Console > Authentication > Settings > Authorized domains
+- domaine a ajouter: `<username>.github.io`
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

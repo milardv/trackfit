@@ -1,5 +1,3 @@
-import React from "react";
-
 export function StatsScreen() {
     return (
         <div className="flex min-h-screen flex-col bg-background-dark pb-24">
@@ -8,7 +6,7 @@ export function StatsScreen() {
                 <button className="flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10">
                     <span className="material-symbols-outlined">arrow_back</span>
                 </button>
-                <h1 className="text-lg font-bold text-white">Performance Analytics</h1>
+                <h1 className="text-lg font-bold text-white">Analyse de performance</h1>
                 <button className="flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10">
                     <span className="material-symbols-outlined">more_vert</span>
                 </button>
@@ -17,13 +15,13 @@ export function StatsScreen() {
             {/* Tabs */}
             <div className="flex border-b border-white/5 px-4">
                 <button className="flex-1 border-b-2 border-primary py-4 text-sm font-bold text-white">
-                    Strength
+                    Force
                 </button>
                 <button className="flex-1 py-4 text-sm font-bold text-text-secondary">
                     Volume
                 </button>
                 <button className="flex-1 py-4 text-sm font-bold text-text-secondary">
-                    Body Metrics
+                    Mesures
                 </button>
             </div>
 
@@ -32,15 +30,15 @@ export function StatsScreen() {
                 <div>
                     <div className="flex items-center gap-3">
                         <h2 className="text-3xl font-bold text-white">
-                            Incline Chest Press
+                            Developpe incline
                         </h2>
                         <span className="rounded-full bg-primary/20 px-2 py-1 text-xs font-bold text-primary">
               PR +5%
             </span>
                     </div>
                     <p className="mt-1 text-sm text-text-secondary">
-                        Weight Progression (kg) <span className="mx-2">•</span>{" "}
-                        <span className="font-bold text-primary">Last 30 Days</span>
+                        Progression de charge (kg) <span className="mx-2">•</span>{" "}
+                        <span className="font-bold text-primary">30 derniers jours</span>
                     </p>
                 </div>
 
@@ -122,10 +120,10 @@ export function StatsScreen() {
 
                     {/* X Axis */}
                     <div className="absolute -bottom-6 left-0 right-0 flex justify-between text-xs text-text-secondary">
-                        <span>Week 1</span>
-                        <span>Week 2</span>
-                        <span>Week 3</span>
-                        <span>Week 4</span>
+                        <span>Semaine 1</span>
+                        <span>Semaine 2</span>
+                        <span>Semaine 3</span>
+                        <span>Semaine 4</span>
                     </div>
                 </div>
 
@@ -140,7 +138,7 @@ export function StatsScreen() {
                 fitness_center
               </span>
                             <span className="text-xs font-bold tracking-wider">
-                MAX WEIGHT
+                CHARGE MAX
               </span>
                         </div>
                         <div className="flex items-baseline gap-1">
@@ -154,7 +152,7 @@ export function StatsScreen() {
               >
                 arrow_drop_up
               </span>
-                            5kg vs last month
+                            5kg vs mois dernier
                         </div>
                     </div>
 
@@ -166,7 +164,7 @@ export function StatsScreen() {
               >
                 emoji_events
               </span>
-                            <span className="text-xs font-bold tracking-wider">EST. 1RM</span>
+                            <span className="text-xs font-bold tracking-wider">1RM EST.</span>
                         </div>
                         <div className="flex items-baseline gap-1">
                             <span className="text-3xl font-bold text-white">162</span>
@@ -179,7 +177,7 @@ export function StatsScreen() {
               >
                 arrow_drop_up
               </span>
-                            2kg vs last month
+                            2kg vs mois dernier
                         </div>
                     </div>
                 </div>
@@ -187,8 +185,8 @@ export function StatsScreen() {
                 {/* Recent Sessions */}
                 <div className="mt-4 flex flex-col gap-4">
                     <div className="flex items-center justify-between">
-                        <h3 className="text-xl font-bold text-white">Recent Sessions</h3>
-                        <button className="text-sm font-bold text-primary">View All</button>
+                        <h3 className="text-xl font-bold text-white">Seances recentes</h3>
+                        <button className="text-sm font-bold text-primary">Voir tout</button>
                     </div>
 
                     <div className="flex flex-col gap-3">
@@ -200,15 +198,15 @@ export function StatsScreen() {
                   </span>
                                 </div>
                                 <div>
-                                    <h4 className="font-bold text-white">Today, 10:30 AM</h4>
+                                    <h4 className="font-bold text-white">Aujourd'hui, 10:30</h4>
                                     <p className="text-sm text-text-secondary">
-                                        4 Sets • 32 Reps Total
+                                        4 series • 32 reps au total
                                     </p>
                                 </div>
                             </div>
                             <div className="text-right">
                                 <p className="font-bold text-white">145 kg</p>
-                                <p className="text-xs text-primary">Best Set</p>
+                                <p className="text-xs text-primary">Meilleure serie</p>
                             </div>
                         </div>
 
@@ -220,15 +218,15 @@ export function StatsScreen() {
                   </span>
                                 </div>
                                 <div>
-                                    <h4 className="font-bold text-white">Oct 24, 09:15 AM</h4>
+                                    <h4 className="font-bold text-white">24 oct., 09:15</h4>
                                     <p className="text-sm text-text-secondary">
-                                        5 Sets • 40 Reps Total
+                                        5 series • 40 reps au total
                                     </p>
                                 </div>
                             </div>
                             <div className="text-right">
                                 <p className="font-bold text-white">140 kg</p>
-                                <p className="text-xs text-text-secondary">Best Set</p>
+                                <p className="text-xs text-text-secondary">Meilleure serie</p>
                             </div>
                         </div>
 
@@ -240,15 +238,15 @@ export function StatsScreen() {
                   </span>
                                 </div>
                                 <div>
-                                    <h4 className="font-bold text-white">Oct 20, 06:45 PM</h4>
+                                    <h4 className="font-bold text-white">20 oct., 18:45</h4>
                                     <p className="text-sm text-text-secondary">
-                                        3 Sets • 24 Reps Total
+                                        3 series • 24 reps au total
                                     </p>
                                 </div>
                             </div>
                             <div className="text-right">
                                 <p className="font-bold text-white">135 kg</p>
-                                <p className="text-xs text-text-secondary">Best Set</p>
+                                <p className="text-xs text-text-secondary">Meilleure serie</p>
                             </div>
                         </div>
                     </div>

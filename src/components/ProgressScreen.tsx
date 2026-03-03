@@ -1,5 +1,3 @@
-import React from "react";
-
 export function ProgressScreen() {
     return (
         <div className="flex min-h-screen flex-col bg-background-dark pb-24">
@@ -8,7 +6,7 @@ export function ProgressScreen() {
                 <button className="flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10">
                     <span className="material-symbols-outlined">arrow_back</span>
                 </button>
-                <h1 className="text-lg font-bold text-white">Body Progress</h1>
+                <h1 className="text-lg font-bold text-white">Evolution corporelle</h1>
                 <button className="flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/10">
                     <span className="material-symbols-outlined">more_vert</span>
                 </button>
@@ -25,7 +23,7 @@ export function ProgressScreen() {
               >
                 monitor_weight
               </span>
-                            <p className="text-sm font-medium text-text-secondary">Weight</p>
+                            <p className="text-sm font-medium text-text-secondary">Poids</p>
                         </div>
                         <div className="flex items-end gap-2">
                             <p className="text-2xl font-bold text-white tracking-tight">
@@ -42,7 +40,7 @@ export function ProgressScreen() {
               </span>
                             <span>2.5%</span>
                             <span className="ml-1 font-normal text-slate-500">
-                vs last month
+                vs mois dernier
               </span>
                         </div>
                     </div>
@@ -56,7 +54,7 @@ export function ProgressScreen() {
                 opacity
               </span>
                             <p className="text-sm font-medium text-text-secondary">
-                                Body Fat
+                                Masse grasse
                             </p>
                         </div>
                         <div className="flex items-end gap-2">
@@ -73,7 +71,7 @@ export function ProgressScreen() {
               </span>
                             <span>1.2%</span>
                             <span className="ml-1 font-normal text-slate-500">
-                vs last month
+                vs mois dernier
               </span>
                         </div>
                     </div>
@@ -83,12 +81,12 @@ export function ProgressScreen() {
                 <section className="flex flex-col gap-4">
                     <div className="flex items-center justify-between px-1">
                         <h2 className="text-xl font-bold text-white tracking-tight">
-                            Measurement History
+                            Historique des mesures
                         </h2>
                         <select className="cursor-pointer bg-transparent text-sm font-medium text-primary focus:outline-none">
-                            <option value="3m">Last 3 Months</option>
-                            <option value="6m">Last 6 Months</option>
-                            <option value="1y">Last Year</option>
+                            <option value="3m">3 derniers mois</option>
+                            <option value="6m">6 derniers mois</option>
+                            <option value="1y">Derniere annee</option>
                         </select>
                     </div>
 
@@ -174,10 +172,10 @@ export function ProgressScreen() {
                             </svg>
 
                             <div className="absolute -bottom-6 left-0 right-0 flex justify-between text-xs font-medium text-slate-500">
-                                <span>Nov 1</span>
-                                <span>Dec 1</span>
-                                <span>Jan 1</span>
-                                <span>Today</span>
+                                <span>1 nov.</span>
+                                <span>1 dec.</span>
+                                <span>1 janv.</span>
+                                <span>Aujourd'hui</span>
                             </div>
                         </div>
                         <div className="h-4"></div>
@@ -188,10 +186,10 @@ export function ProgressScreen() {
                 <section className="mt-2 flex flex-col gap-4">
                     <div className="flex items-center justify-between px-1">
                         <h2 className="text-xl font-bold text-white tracking-tight">
-                            Progress Photos
+                            Photos de progression
                         </h2>
                         <button className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
-                            See All
+                            Voir tout
                         </button>
                     </div>
 
@@ -199,13 +197,13 @@ export function ProgressScreen() {
                         <div className="group relative aspect-[3/4] overflow-hidden rounded-xl bg-card-dark border border-white/5">
                             <img
                                 src="https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?q=80&w=1470&auto=format&fit=crop"
-                                alt="Progress Jan 12"
+                                alt="Progression 12 janv."
                                 className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover:scale-105 group-hover:opacity-100"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
                             <div className="absolute bottom-3 left-3">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-white/90">
-                                    Jan 12, 2024
+                                    12 janv. 2024
                                 </p>
                                 <p className="text-sm font-bold text-white">188 lbs</p>
                             </div>
@@ -222,13 +220,13 @@ export function ProgressScreen() {
                         <div className="group relative aspect-[3/4] overflow-hidden rounded-xl bg-card-dark border border-white/5">
                             <img
                                 src="https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?q=80&w=1470&auto=format&fit=crop"
-                                alt="Progress Feb 15"
+                                alt="Progression 15 fev."
                                 className="h-full w-full object-cover opacity-80 transition-transform duration-500 group-hover:scale-105 group-hover:opacity-100"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
                             <div className="absolute bottom-3 left-3">
                                 <p className="text-xs font-semibold uppercase tracking-wider text-white/90">
-                                    Feb 15, 2024
+                                    15 fev. 2024
                                 </p>
                                 <p className="text-sm font-bold text-white">185 lbs</p>
                             </div>
@@ -242,23 +240,23 @@ export function ProgressScreen() {
                                 <div className="h-10 w-10 overflow-hidden rounded-full border-2 border-card-dark">
                                     <img
                                         src="https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?q=80&w=150&auto=format&fit=crop"
-                                        alt="Thumb 1"
+                                        alt="Miniature 1"
                                         className="h-full w-full object-cover"
                                     />
                                 </div>
                                 <div className="relative h-10 w-10 overflow-hidden rounded-full border-2 border-card-dark">
                                     <img
                                         src="https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?q=80&w=150&auto=format&fit=crop"
-                                        alt="Thumb 2"
+                                        alt="Miniature 2"
                                         className="h-full w-full object-cover"
                                     />
                                 </div>
                             </div>
                             <div className="flex flex-col">
                 <span className="text-sm font-bold text-white">
-                  Compare Photos
+                  Comparer les photos
                 </span>
-                                <span className="text-xs text-slate-500">Jan 12 vs Feb 15</span>
+                                <span className="text-xs text-slate-500">12 janv. vs 15 fev.</span>
                             </div>
                         </div>
                         <span
