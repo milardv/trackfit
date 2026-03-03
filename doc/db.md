@@ -40,6 +40,10 @@ Les programmes préparés à l'avance.
     * `name` : "Keep Cool - Full Body"
     * `gymName` : "Keep Cool Prado"
     * `isActive` : true
+    * `estimatedDurationMin` : 58
+    * `estimatedCaloriesKcal` : 420
+    * `estimationSource` : "hybrid"
+    * `estimatedAt` : "2026-03-03T18:00:00Z"
 
 * **`plans/{planId}/items/{itemId}`** (Le contenu séquentiel)
     * `order` : 1
@@ -60,6 +64,8 @@ L'instance unique d'une séance. On ne touche plus aux modèles.
     * `planId` : "plan_keepcool_fb"
     * `status` : "active"
     * `startedAt` : "2026-03-03T18:00:00Z"
+    * `estimatedDurationMin` : 58
+    * `estimatedCaloriesKcal` : 420
 
 * **`sessions/{sessionId}/exercises/{sessionExerciseId}`** (Le snapshot de l'exercice)
     * `exerciseId` : "ex_benchpress_01"
@@ -87,5 +93,4 @@ Collections plates pour les graphiques.
 * **`progressPhotos/{photoId}`** (Photos d'évolution)
     * `storagePath` : "users/uid/photos/2026_03_01_face.jpg"
     * `weightKgSnapshot` : 78.5
-
 

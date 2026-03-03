@@ -20,6 +20,7 @@ import { db } from "../firebase.ts";
 import type {
   ActiveSessionDoc,
   BodyMetricDoc,
+  EstimationSource,
   ExerciseDoc,
   ExerciseStatsDoc,
   ExerciseTimelinePointDoc,
@@ -39,6 +40,8 @@ const exercisesCollectionRef = (uid: string) =>
   collection(db, "users", uid, "exercises");
 const plansCollectionRef = (uid: string) =>
   collection(db, "users", uid, "plans");
+const planDocRef = (uid: string, planId: string) =>
+  doc(db, "users", uid, "plans", planId);
 const planItemsCollectionRef = (uid: string, planId: string) =>
   collection(db, "users", uid, "plans", planId, "items");
 const sessionsCollectionRef = (uid: string) =>
@@ -118,6 +121,10 @@ export interface CreatePlanInput {
   name: string;
   gymName: string;
   isActive?: boolean;
+  estimatedDurationMin?: number | null;
+  estimatedCaloriesKcal?: number | null;
+  estimationSource?: EstimationSource | null;
+  estimatedAt?: Timestamp | null;
 }
 
 export interface CreatePlanItemInput {
@@ -149,6 +156,10 @@ export interface AddPlanItemInput {
 export interface StartSessionInput {
   planId?: string | null;
   gymName: string;
+  estimatedDurationMin?: number | null;
+  estimatedCaloriesKcal?: number | null;
+  estimationSource?: EstimationSource | null;
+  estimatedAt?: Timestamp | null;
   notes?: string;
 }
 
@@ -279,14 +290,59 @@ export async function listExercises(
     .filter((exercise) => exercise.isActive);
 }
 
+export async function listPlans(
+  uid: string,
+  maxItems = 100,
+): Promise<Array<PlanDoc & { id: string }>> {
+  const plansQuery = query(
+    plansCollectionRef(uid),
+    orderBy("updatedAt", "desc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(plansQuery);
+
+  return snapshot.docs
+    .map((document) => ({
+      id: document.id,
+      ...(document.data() as PlanDoc),
+    }))
+    .filter((plan) => plan.isActive);
+}
+
+export async function listPlanItems(
+  uid: string,
+  planId: string,
+  maxItems = 100,
+): Promise<Array<PlanItemDoc & { id: string }>> {
+  const itemsQuery = query(
+    planItemsCollectionRef(uid, planId),
+    orderBy("order", "asc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(itemsQuery);
+
+  return snapshot.docs.map((document) => ({
+    id: document.id,
+    ...(document.data() as PlanItemDoc),
+  }));
+}
+
 export async function createPlan(
   uid: string,
   input: CreatePlanInput,
 ): Promise<string> {
+  const hasEstimate =
+    input.estimatedDurationMin !== undefined ||
+    input.estimatedCaloriesKcal !== undefined;
+
   const payload: WithFieldValue<PlanDoc> = {
     name: input.name,
     gymName: input.gymName,
     isActive: input.isActive ?? true,
+    estimatedDurationMin: input.estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: input.estimatedCaloriesKcal ?? null,
+    estimationSource: input.estimationSource ?? null,
+    estimatedAt: input.estimatedAt ?? (hasEstimate ? serverTimestamp() : null),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -301,11 +357,18 @@ export async function createPlanWithItems(
 ): Promise<string> {
   const planReference = doc(plansCollectionRef(uid));
   const batch = writeBatch(db);
+  const hasEstimate =
+    input.estimatedDurationMin !== undefined ||
+    input.estimatedCaloriesKcal !== undefined;
 
   const planPayload: WithFieldValue<PlanDoc> = {
     name: input.name,
     gymName: input.gymName,
     isActive: input.isActive ?? true,
+    estimatedDurationMin: input.estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: input.estimatedCaloriesKcal ?? null,
+    estimationSource: input.estimationSource ?? null,
+    estimatedAt: input.estimatedAt ?? (hasEstimate ? serverTimestamp() : null),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -360,6 +423,30 @@ export async function startSession(
 ): Promise<string> {
   const sessionReference = doc(sessionsCollectionRef(uid));
   const batch = writeBatch(db);
+  let estimatedDurationMin = input.estimatedDurationMin;
+  let estimatedCaloriesKcal = input.estimatedCaloriesKcal;
+  let estimationSource = input.estimationSource;
+  let estimatedAt = input.estimatedAt;
+
+  if (
+    input.planId &&
+    estimatedDurationMin === undefined &&
+    estimatedCaloriesKcal === undefined &&
+    estimationSource === undefined &&
+    estimatedAt === undefined
+  ) {
+    const planSnapshot = await getDoc(planDocRef(uid, input.planId));
+    if (planSnapshot.exists()) {
+      const planData = planSnapshot.data() as PlanDoc;
+      estimatedDurationMin = planData.estimatedDurationMin ?? null;
+      estimatedCaloriesKcal = planData.estimatedCaloriesKcal ?? null;
+      estimationSource = planData.estimationSource ?? null;
+      estimatedAt = planData.estimatedAt ?? null;
+    }
+  }
+
+  const hasEstimate =
+    estimatedDurationMin !== undefined || estimatedCaloriesKcal !== undefined;
 
   const sessionPayload: WithFieldValue<SessionDoc> = {
     planId: input.planId ?? null,
@@ -368,6 +455,10 @@ export async function startSession(
     startedAt: serverTimestamp(),
     endedAt: null,
     durationSec: null,
+    estimatedDurationMin: estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: estimatedCaloriesKcal ?? null,
+    estimationSource: estimationSource ?? null,
+    estimatedAt: estimatedAt ?? (hasEstimate ? serverTimestamp() : null),
     notes: input.notes ?? "",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

@@ -30,6 +30,21 @@ Si tu utilises Firebase Auth Google en production, ajoute aussi ce domaine dans:
 - Firebase Console > Authentication > Settings > Authorized domains
 - domaine a ajouter: `<username>.github.io`
 
+### Secret GitHub pour Gemini
+
+Pour que les requetes Gemini fonctionnent apres deploiement GitHub Pages:
+
+1. Ouvrir le repo GitHub > `Settings` > `Secrets and variables` > `Actions`
+2. Ajouter un secret `GEMINI_API_KEY` avec ta cle API
+3. Relancer le workflow `Deploy to GitHub Pages`
+
+## Estimation IA (duree + calories)
+
+La creation de seance utilise une estimation locale + Gemini directement depuis le front.
+
+- Fallback automatique: formule locale si Gemini ne repond pas
+- Champs enregistres sur le plan: `estimatedDurationMin`, `estimatedCaloriesKcal`, `estimationSource`, `estimatedAt`
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

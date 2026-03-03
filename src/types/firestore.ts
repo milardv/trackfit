@@ -11,6 +11,7 @@ export type TrackingMode = (typeof TRACKING_MODES)[number];
 export const SESSION_STATUSES = ["active", "completed", "cancelled"] as const;
 
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
+export type EstimationSource = "formula" | "gemini" | "hybrid" | "formula_fallback";
 
 interface TimestampedDoc {
   createdAt: Timestamp;
@@ -39,6 +40,10 @@ export interface PlanDoc extends TimestampedDoc {
   name: string;
   gymName: string;
   isActive: boolean;
+  estimatedDurationMin: number | null;
+  estimatedCaloriesKcal: number | null;
+  estimationSource: EstimationSource | null;
+  estimatedAt: Timestamp | null;
 }
 
 export interface PlanItemDoc extends TimestampedDoc {
@@ -59,6 +64,10 @@ export interface SessionDoc extends TimestampedDoc {
   startedAt: Timestamp;
   endedAt: Timestamp | null;
   durationSec: number | null;
+  estimatedDurationMin: number | null;
+  estimatedCaloriesKcal: number | null;
+  estimationSource: EstimationSource | null;
+  estimatedAt: Timestamp | null;
   notes: string;
 }
 

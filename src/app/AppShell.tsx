@@ -26,7 +26,15 @@ interface AppShellProps {
   onSignOut: () => Promise<void>;
 }
 
-function renderScreen(screen: Screen, user: User) {
+interface RenderScreenOptions {
+  user: User;
+  onCreateSession: () => void;
+  workoutRefreshKey: number;
+}
+
+function renderScreen(screen: Screen, options: RenderScreenOptions) {
+  const { user, onCreateSession, workoutRefreshKey } = options;
+
   if (screen === "home") {
     return (
       <HomeScreen
@@ -37,7 +45,13 @@ function renderScreen(screen: Screen, user: User) {
   }
 
   if (screen === "workout") {
-    return <WorkoutScreen />;
+    return (
+      <WorkoutScreen
+        userId={user.uid}
+        onCreateSession={onCreateSession}
+        refreshKey={workoutRefreshKey}
+      />
+    );
   }
 
   if (screen === "stats") {
@@ -57,6 +71,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   );
   const [isSessionConfigOpen, setIsSessionConfigOpen] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [workoutRefreshKey, setWorkoutRefreshKey] = useState(0);
   const [sessionCreateError, setSessionCreateError] = useState<string | null>(
     null,
   );
@@ -87,8 +102,10 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
       await createExercise(user.uid, {
         name: config.name,
         category: "personnalise",
-        trackingMode: "duration_only",
+        trackingMode: config.trackingMode,
         defaultSets: config.sets,
+        defaultReps: config.reps,
+        defaultWeightKg: config.weightKg,
         defaultDurationSec: config.durationSec,
         defaultRestSec: config.restSec,
       });
@@ -131,6 +148,9 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
       await createPlanWithItems(user.uid, {
         name: config.name,
         gymName: config.gymName,
+        estimatedDurationMin: config.estimatedDurationMin,
+        estimatedCaloriesKcal: config.estimatedCaloriesKcal,
+        estimationSource: config.estimationSource,
         items: config.exercises.map((exercise, index) => ({
           order: index + 1,
           exerciseId: exercise.id,
@@ -145,6 +165,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
       setCurrentScreen("workout");
       setIsSessionConfigOpen(false);
       setIsQuickAddOpen(false);
+      setWorkoutRefreshKey((value) => value + 1);
     } catch {
       setSessionCreateError(
         "Impossible d enregistrer la seance pour le moment. Reessaie dans un instant.",
@@ -169,7 +190,11 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
         </button>
       ) : null}
 
-      {renderScreen(currentScreen, user)}
+      {renderScreen(currentScreen, {
+        user,
+        onCreateSession: handleCreateSession,
+        workoutRefreshKey,
+      })}
 
       <BottomNav
         currentScreen={currentScreen}

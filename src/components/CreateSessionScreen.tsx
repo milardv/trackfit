@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { ExercisePickerScreen } from "./ExercisePickerScreen.tsx";
+import { estimateSessionMetrics } from "../services/sessionEstimationService.ts";
 import { listExercises } from "../services/firestoreService.ts";
+import type { EstimationSource } from "../types/firestore.ts";
+import type { SessionEstimationInput } from "../types/sessionEstimation.ts";
 import type { ExerciseDoc, TrackingMode } from "../types/firestore.ts";
 
 type ExerciseOption = ExerciseDoc & { id: string };
@@ -19,6 +23,9 @@ export interface SessionConfig {
   name: string;
   gymName: string;
   exercises: SessionExerciseSelection[];
+  estimatedDurationMin: number | null;
+  estimatedCaloriesKcal: number | null;
+  estimationSource: EstimationSource | null;
 }
 
 interface CreateSessionScreenProps {
@@ -51,6 +58,22 @@ function getExerciseTarget(exercise: SessionExerciseSelection): string {
   return "Objectif libre";
 }
 
+function getEstimationSourceLabel(source: EstimationSource | null): string {
+  if (source === "gemini") {
+    return "Gemini";
+  }
+  if (source === "hybrid") {
+    return "Hybride";
+  }
+  if (source === "formula_fallback") {
+    return "Formule (secours)";
+  }
+  if (source === "formula") {
+    return "Formule";
+  }
+  return "N/A";
+}
+
 export function CreateSessionScreen({
   userId,
   onBack,
@@ -64,7 +87,15 @@ export function CreateSessionScreen({
     [],
   );
   const [selectedExerciseIds, setSelectedExerciseIds] = useState<string[]>([]);
+  const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
+  const [exerciseSearchQuery, setExerciseSearchQuery] = useState("");
   const [isLoadingExercises, setIsLoadingExercises] = useState(true);
+  const [isEstimatingMetrics, setIsEstimatingMetrics] = useState(false);
+  const [sessionEstimate, setSessionEstimate] = useState<{
+    estimatedDurationMin: number;
+    estimatedCaloriesKcal: number;
+    estimationSource: EstimationSource;
+  } | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -73,6 +104,10 @@ export function CreateSessionScreen({
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (isExercisePickerOpen) {
+          setIsExercisePickerOpen(false);
+          return;
+        }
         onBack();
       }
     };
@@ -83,7 +118,7 @@ export function CreateSessionScreen({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [onBack]);
+  }, [isExercisePickerOpen, onBack]);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,25 +172,82 @@ export function CreateSessionScreen({
       .filter((exercise): exercise is ExerciseOption => Boolean(exercise));
   }, [availableExercises, selectedExerciseIds]);
 
-  const canAddExercise =
-    availableExercises.length > 0 &&
-    selectedExerciseIds.length < availableExercises.length;
+  const estimationInput = useMemo<SessionEstimationInput>(
+    () => ({
+      gymName: gymName.trim() || "Salle",
+      exercises: selectedExercises.map((exercise) => ({
+        id: exercise.id,
+        name: exercise.name,
+        trackingMode: exercise.trackingMode,
+        targetSets: exercise.defaultSets,
+        targetReps: exercise.defaultReps,
+        targetWeightKg: exercise.defaultWeightKg,
+        targetDurationSec: exercise.defaultDurationSec,
+        restSec: exercise.defaultRestSec,
+      })),
+    }),
+    [gymName, selectedExercises],
+  );
 
-  const addExercise = () => {
-    if (!canAddExercise) {
+  useEffect(() => {
+    if (selectedExercises.length === 0 || isLoadingExercises) {
+      setSessionEstimate(null);
+      setIsEstimatingMetrics(false);
       return;
     }
 
-    const next = availableExercises.find(
-      (exercise) => !selectedExerciseIds.includes(exercise.id),
-    );
+    let cancelled = false;
+    setIsEstimatingMetrics(true);
 
-    if (!next) {
+    const timer = window.setTimeout(() => {
+      void estimateSessionMetrics(estimationInput)
+        .then((estimate) => {
+          if (!cancelled) {
+            setSessionEstimate(estimate);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSessionEstimate(null);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setIsEstimatingMetrics(false);
+          }
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [estimationInput, isLoadingExercises, selectedExercises.length]);
+
+  const addExerciseById = (exerciseId: string) => {
+    if (selectedExerciseIds.includes(exerciseId)) {
       return;
     }
 
-    setSelectedExerciseIds((previous) => [...previous, next.id]);
+    setSelectedExerciseIds((previous) => [...previous, exerciseId]);
     setLocalError(null);
+  };
+
+  const openExercisePicker = () => {
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(true);
+  };
+
+  const closeExercisePicker = () => {
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(false);
+  };
+
+  const handleCreateExerciseFromPicker = () => {
+    closeExercisePicker();
+    setLocalError(
+      "Pour creer un nouvel exercice, passe par le menu Ajouter puis Nouvel exercice.",
+    );
   };
 
   const removeExercise = (exerciseId: string) => {
@@ -205,6 +297,9 @@ export function CreateSessionScreen({
         defaultDurationSec: exercise.defaultDurationSec,
         defaultRestSec: exercise.defaultRestSec,
       })),
+      estimatedDurationMin: sessionEstimate?.estimatedDurationMin ?? null,
+      estimatedCaloriesKcal: sessionEstimate?.estimatedCaloriesKcal ?? null,
+      estimationSource: sessionEstimate?.estimationSource ?? null,
     });
   };
 
@@ -277,8 +372,8 @@ export function CreateSessionScreen({
             <h3 className="text-xl font-bold text-white">Exercices</h3>
             <button
               type="button"
-              onClick={addExercise}
-              disabled={!canAddExercise || isLoadingExercises}
+              onClick={openExercisePicker}
+              disabled={isLoadingExercises}
               className="group flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-xl text-primary transition-transform group-hover:scale-110">
@@ -291,6 +386,42 @@ export function CreateSessionScreen({
           {isLoadingExercises ? (
             <div className="rounded-xl border border-white/10 bg-card-dark p-4 text-sm text-text-secondary">
               Chargement des exercices...
+            </div>
+          ) : null}
+
+          {selectedExercises.length > 0 ? (
+            <div className="rounded-xl border border-primary/20 bg-card-dark p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+                  Estimation de seance
+                </p>
+                <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-bold text-primary">
+                  {isEstimatingMetrics
+                    ? "Calcul..."
+                    : getEstimationSourceLabel(sessionEstimate?.estimationSource ?? null)}
+                </span>
+              </div>
+
+              {sessionEstimate ? (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-white/10 bg-[#1c2e21] px-3 py-2">
+                    <p className="text-xs text-slate-400">Duree estimee</p>
+                    <p className="text-base font-bold text-white">
+                      {sessionEstimate.estimatedDurationMin} min
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-[#1c2e21] px-3 py-2">
+                    <p className="text-xs text-slate-400">Calories estimees</p>
+                    <p className="text-base font-bold text-white">
+                      {sessionEstimate.estimatedCaloriesKcal} kcal
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-slate-400">
+                  L estimation sera calculee des qu au moins un exercice est ajoute.
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -357,19 +488,31 @@ export function CreateSessionScreen({
             {!isLoadingExercises && selectedExercises.length === 0 ? (
               <button
                 type="button"
-                onClick={addExercise}
-                disabled={!canAddExercise}
+                onClick={openExercisePicker}
                 className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-white/10 py-6 transition-colors hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-slate-500">add</span>
                 <span className="text-sm font-medium text-slate-500">
-                  Ajouter un exercice rapide
+                  Ajouter un exercice
                 </span>
               </button>
             ) : null}
           </div>
         </section>
       </main>
+
+      {isExercisePickerOpen ? (
+        <ExercisePickerScreen
+          exercises={availableExercises}
+          selectedExerciseIds={selectedExerciseIds}
+          searchQuery={exerciseSearchQuery}
+          isLoading={isLoadingExercises}
+          onSearchChange={setExerciseSearchQuery}
+          onClose={closeExercisePicker}
+          onAddExercise={addExerciseById}
+          onCreateExercise={handleCreateExerciseFromPicker}
+        />
+      ) : null}
 
       <div className="fixed bottom-0 left-0 right-0 z-20 mx-auto w-full max-w-md border-t border-white/5 bg-background-dark/95 p-4 backdrop-blur-lg">
         {displayedError ? (
