@@ -29,6 +29,7 @@ import type {
   ProgressPhotoDoc,
   SessionDoc,
   SessionExerciseDoc,
+  SessionExerciseStatus,
   SessionStatus,
   SetEntryDoc,
   TrackingMode,
@@ -327,6 +328,58 @@ export async function listPlanItems(
   }));
 }
 
+export async function listSessions(
+  uid: string,
+  maxItems = 120,
+): Promise<Array<SessionDoc & { id: string }>> {
+  const sessionsQuery = query(
+    sessionsCollectionRef(uid),
+    orderBy("startedAt", "desc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(sessionsQuery);
+
+  return snapshot.docs.map((document) => ({
+    id: document.id,
+    ...(document.data() as SessionDoc),
+  }));
+}
+
+export async function listSessionExercises(
+  uid: string,
+  sessionId: string,
+  maxItems = 120,
+): Promise<Array<SessionExerciseDoc & { id: string }>> {
+  const exercisesQuery = query(
+    sessionExercisesCollectionRef(uid, sessionId),
+    orderBy("order", "asc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(exercisesQuery);
+
+  return snapshot.docs.map((document) => ({
+    id: document.id,
+    ...(document.data() as SessionExerciseDoc),
+  }));
+}
+
+export async function listBodyMetrics(
+  uid: string,
+  maxItems = 120,
+): Promise<Array<BodyMetricDoc & { id: string }>> {
+  const metricsQuery = query(
+    bodyMetricsCollectionRef(uid),
+    orderBy("measuredAt", "desc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(metricsQuery);
+
+  return snapshot.docs.map((document) => ({
+    id: document.id,
+    ...(document.data() as BodyMetricDoc),
+  }));
+}
+
 export async function createPlan(
   uid: string,
   input: CreatePlanInput,
@@ -487,40 +540,38 @@ export async function endSession(
 ): Promise<void> {
   const sessionReference = sessionDocRef(uid, sessionId);
   const activeReference = activeSessionDocRef(uid);
+  const sessionSnapshot = await getDoc(sessionReference);
+  if (!sessionSnapshot.exists()) {
+    throw new Error(`Session "${sessionId}" introuvable.`);
+  }
 
-  await runTransaction(db, async (transaction) => {
-    const sessionSnapshot = await transaction.get(sessionReference);
-    if (!sessionSnapshot.exists()) {
-      throw new Error(`Session "${sessionId}" introuvable.`);
+  const session = sessionSnapshot.data() as SessionDoc;
+  const endedAt = Timestamp.now();
+  const durationSec =
+    session.startedAt instanceof Timestamp
+      ? Math.max(0, Math.round((endedAt.toMillis() - session.startedAt.toMillis()) / 1000))
+      : session.durationSec;
+
+  const batch = writeBatch(db);
+
+  const sessionPatch: PartialWithFieldValue<SessionDoc> = {
+    status,
+    endedAt,
+    durationSec: durationSec ?? null,
+    notes: notes ?? session.notes ?? "",
+    updatedAt: serverTimestamp(),
+  };
+  batch.set(sessionReference, sessionPatch, { merge: true });
+
+  const activeSnapshot = await getDoc(activeReference);
+  if (activeSnapshot.exists()) {
+    const activeSession = activeSnapshot.data() as ActiveSessionDoc;
+    if (activeSession.sessionId === sessionId) {
+      batch.delete(activeReference);
     }
+  }
 
-    const session = sessionSnapshot.data() as SessionDoc;
-    const endedAt = Timestamp.now();
-    const durationSec =
-      session.startedAt instanceof Timestamp
-        ? Math.max(
-            0,
-            Math.round((endedAt.toMillis() - session.startedAt.toMillis()) / 1000),
-          )
-        : session.durationSec;
-
-    const sessionPatch: PartialWithFieldValue<SessionDoc> = {
-      status,
-      endedAt,
-      durationSec: durationSec ?? null,
-      notes: notes ?? session.notes,
-      updatedAt: serverTimestamp(),
-    };
-    transaction.set(sessionReference, sessionPatch, { merge: true });
-
-    const activeSnapshot = await transaction.get(activeReference);
-    if (activeSnapshot.exists()) {
-      const activeSession = activeSnapshot.data() as ActiveSessionDoc;
-      if (activeSession.sessionId === sessionId) {
-        transaction.delete(activeReference);
-      }
-    }
-  });
+  await batch.commit();
 }
 
 export async function startExercise(
@@ -534,6 +585,8 @@ export async function startExercise(
   const payload: WithFieldValue<SessionExerciseDoc> = {
     exerciseId: input.exerciseId,
     exerciseNameSnapshot: input.exerciseNameSnapshot,
+    status: "active",
+    completedAt: null,
     order: input.order,
     trackingMode: input.trackingMode,
     targetSets: input.targetSets,
@@ -570,11 +623,15 @@ export async function endExercise(
   uid: string,
   sessionId: string,
   sessionExerciseId: string,
+  status: SessionExerciseStatus = "completed",
 ): Promise<void> {
   const batch = writeBatch(db);
+  const endedAt = Timestamp.now();
 
   const exercisePatch: PartialWithFieldValue<SessionExerciseDoc> = {
-    endedAt: Timestamp.now(),
+    status,
+    endedAt,
+    completedAt: status === "completed" ? endedAt : null,
     updatedAt: serverTimestamp(),
   };
 

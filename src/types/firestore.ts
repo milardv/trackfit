@@ -11,6 +11,13 @@ export type TrackingMode = (typeof TRACKING_MODES)[number];
 export const SESSION_STATUSES = ["active", "completed", "cancelled"] as const;
 
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
+export const SESSION_EXERCISE_STATUSES = [
+  "active",
+  "completed",
+  "cancelled",
+] as const;
+
+export type SessionExerciseStatus = (typeof SESSION_EXERCISE_STATUSES)[number];
 export type EstimationSource = "formula" | "gemini" | "hybrid" | "formula_fallback";
 
 interface TimestampedDoc {
@@ -74,6 +81,8 @@ export interface SessionDoc extends TimestampedDoc {
 export interface SessionExerciseDoc extends TimestampedDoc {
   exerciseId: string;
   exerciseNameSnapshot: string;
+  status: SessionExerciseStatus;
+  completedAt: Timestamp | null;
   order: number;
   trackingMode: TrackingMode;
   targetSets: number;

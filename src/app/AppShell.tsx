@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { User } from "firebase/auth";
+import { ActiveSessionScreen } from "../components/ActiveSessionScreen.tsx";
 import { BottomNav } from "../components/BottomNav.tsx";
 import {
   CreateSessionScreen,
@@ -13,7 +14,10 @@ import { HomeScreen } from "../components/HomeScreen.tsx";
 import { ProgressScreen } from "../components/ProgressScreen.tsx";
 import { QuickAddScreen } from "../components/QuickAddScreen.tsx";
 import { StatsScreen } from "../components/StatsScreen.tsx";
-import { WorkoutScreen } from "../components/WorkoutScreen.tsx";
+import {
+  WorkoutScreen,
+  type WorkoutPlanToStart,
+} from "../components/WorkoutScreen.tsx";
 import {
   createExercise,
   createPlanWithItems,
@@ -29,11 +33,12 @@ interface AppShellProps {
 interface RenderScreenOptions {
   user: User;
   onCreateSession: () => void;
+  onStartPlan: (plan: WorkoutPlanToStart) => void;
   workoutRefreshKey: number;
 }
 
 function renderScreen(screen: Screen, options: RenderScreenOptions) {
-  const { user, onCreateSession, workoutRefreshKey } = options;
+  const { user, onCreateSession, onStartPlan, workoutRefreshKey } = options;
 
   if (screen === "home") {
     return (
@@ -49,13 +54,14 @@ function renderScreen(screen: Screen, options: RenderScreenOptions) {
       <WorkoutScreen
         userId={user.uid}
         onCreateSession={onCreateSession}
+        onStartPlan={onStartPlan}
         refreshKey={workoutRefreshKey}
       />
     );
   }
 
   if (screen === "stats") {
-    return <StatsScreen />;
+    return <StatsScreen userId={user.uid} />;
   }
 
   return <ProgressScreen />;
@@ -75,6 +81,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   const [sessionCreateError, setSessionCreateError] = useState<string | null>(
     null,
   );
+  const [activePlan, setActivePlan] = useState<WorkoutPlanToStart | null>(null);
 
   const handleCreateExercise = () => {
     setExerciseCreateError(null);
@@ -175,6 +182,23 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
     }
   };
 
+  const handleStartPlan = (plan: WorkoutPlanToStart) => {
+    setIsQuickAddOpen(false);
+    setIsSessionConfigOpen(false);
+    setSessionCreateError(null);
+    setCurrentScreen("workout");
+    setActivePlan(plan);
+  };
+
+  const handleCloseActivePlan = () => {
+    setActivePlan(null);
+    setCurrentScreen("workout");
+  };
+
+  const handleSessionPersisted = () => {
+    setWorkoutRefreshKey((value) => value + 1);
+  };
+
   return (
     <div className="min-h-screen bg-background-dark text-text-primary font-display">
       {currentScreen === "progress" ? (
@@ -193,6 +217,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
       {renderScreen(currentScreen, {
         user,
         onCreateSession: handleCreateSession,
+        onStartPlan: handleStartPlan,
         workoutRefreshKey,
       })}
 
@@ -226,6 +251,15 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
           onSave={handleSaveSessionConfig}
           isSubmitting={isCreatingSession}
           errorMessage={sessionCreateError}
+        />
+      ) : null}
+
+      {activePlan ? (
+        <ActiveSessionScreen
+          userId={user.uid}
+          plan={activePlan}
+          onClose={handleCloseActivePlan}
+          onSessionPersisted={handleSessionPersisted}
         />
       ) : null}
 

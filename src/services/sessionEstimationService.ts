@@ -71,7 +71,6 @@ function buildGeminiPrompt(
   input: SessionEstimationInput,
   formulaEstimate: SessionEstimationResult,
 ): string {
-  console.log("exercices: ", input.exercises);
   return [
     "Tu es un coach fitness.",
     "Retourne uniquement un JSON valide avec les clefs:",
@@ -86,6 +85,41 @@ function buildGeminiPrompt(
     "- valeurs entieres strictement positives",
     "- pas de texte hors JSON",
   ].join("\n");
+}
+
+async function getGeminiEstimate(
+  ai: {
+    models: {
+      generateContent: (args: {
+        model: string;
+        contents: Array<{ role: "user"; parts: Array<{ text: string }> }>;
+        config?: { responseMimeType: "application/json" };
+      }) => Promise<unknown>;
+    };
+  },
+  prompt: string,
+  useJsonMimeType: boolean,
+): Promise<{ estimatedDurationMin: number; estimatedCaloriesKcal: number } | null> {
+  const request: {
+    model: string;
+    contents: Array<{ role: "user"; parts: Array<{ text: string }> }>;
+    config?: { responseMimeType: "application/json" };
+  } = {
+    model: GEMINI_MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: prompt }],
+      },
+    ],
+  };
+
+  if (useJsonMimeType) {
+    request.config = { responseMimeType: "application/json" };
+  }
+
+  const response = await ai.models.generateContent(request);
+  return parseGeminiEstimate(extractGeminiText(response));
 }
 
 function getExerciseSeconds(exercise: SessionEstimationExerciseInput): number {
@@ -185,15 +219,9 @@ export async function estimateSessionMetrics(
   try {
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: buildGeminiPrompt(input, formulaEstimate),
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
-
-    const parsed = parseGeminiEstimate(extractGeminiText(response));
+    const prompt = buildGeminiPrompt(input, formulaEstimate);
+    const parsed =
+      (await getGeminiEstimate(ai, prompt, true)) ?? (await getGeminiEstimate(ai, prompt, false));
     if (!parsed) {
       return { ...formulaEstimate, estimationSource: "formula_fallback" };
     }

@@ -4,21 +4,41 @@ import {
   listPlanItems,
   listPlans,
 } from "../services/firestoreService.ts";
+import type { EstimationSource, TrackingMode } from "../types/firestore.ts";
 
 interface WorkoutScreenProps {
   userId: string;
   onCreateSession: () => void;
+  onStartPlan: (plan: WorkoutPlanToStart) => void;
   refreshKey?: number;
 }
 
-interface PlanCard {
+export interface WorkoutPlanExercise {
+  key: string;
+  exerciseId: string;
+  exerciseName: string;
+  order: number;
+  trackingMode: TrackingMode;
+  targetSets: number;
+  targetReps: number | null;
+  targetWeightKg: number | null;
+  targetDurationSec: number | null;
+  restSec: number;
+}
+
+export interface WorkoutPlanToStart {
   id: string;
   name: string;
   gymName: string;
-  exerciseCount: number;
-  exerciseNames: string[];
   estimatedDurationMin: number | null;
   estimatedCaloriesKcal: number | null;
+  estimationSource: EstimationSource | null;
+  exercises: WorkoutPlanExercise[];
+}
+
+interface PlanCard extends WorkoutPlanToStart {
+  exerciseCount: number;
+  exerciseNames: string[];
 }
 
 function normalizeGymLabel(gymName: string): string {
@@ -40,6 +60,7 @@ function getGymTone(gymName: string): string {
 export function WorkoutScreen({
   userId,
   onCreateSession,
+  onStartPlan,
   refreshKey = 0,
 }: WorkoutScreenProps) {
   const [plans, setPlans] = useState<PlanCard[]>([]);
@@ -58,26 +79,42 @@ export function WorkoutScreen({
           listPlans(userId, 30),
           listExercises(userId, 300),
         ]);
-        const exerciseNamesById = new Map(
-          exerciseDocs.map((exercise) => [exercise.id, exercise.name]),
-        );
+        const exerciseById = new Map(exerciseDocs.map((exercise) => [exercise.id, exercise]));
 
         const planCards = await Promise.all(
           planDocs.map(async (plan) => {
             const items = await listPlanItems(userId, plan.id, 40);
-            const names = items
-              .slice()
-              .sort((a, b) => a.order - b.order)
-              .map((item) => exerciseNamesById.get(item.exerciseId) ?? "Exercice");
+            const sortedItems = items.slice().sort((a, b) => a.order - b.order);
+
+            const exercises = sortedItems.map((item, index) => {
+              const linkedExercise = exerciseById.get(item.exerciseId);
+              const exerciseName = linkedExercise?.name ?? "Exercice";
+              const trackingMode = linkedExercise?.trackingMode ?? "reps_only";
+
+              return {
+                key: `${item.exerciseId}-${item.order}-${index}`,
+                exerciseId: item.exerciseId,
+                exerciseName,
+                order: item.order,
+                trackingMode,
+                targetSets: Math.max(1, item.targetSets),
+                targetReps: item.targetReps ?? null,
+                targetWeightKg: item.targetWeightKg ?? null,
+                targetDurationSec: item.targetDurationSec ?? null,
+                restSec: Math.max(0, item.restSec),
+              } satisfies WorkoutPlanExercise;
+            });
 
             return {
               id: plan.id,
               name: plan.name,
               gymName: normalizeGymLabel(plan.gymName),
-              exerciseCount: items.length,
-              exerciseNames: names,
-              estimatedDurationMin: plan.estimatedDurationMin,
-              estimatedCaloriesKcal: plan.estimatedCaloriesKcal,
+              estimatedDurationMin: plan.estimatedDurationMin ?? null,
+              estimatedCaloriesKcal: plan.estimatedCaloriesKcal ?? null,
+              estimationSource: plan.estimationSource ?? null,
+              exerciseCount: exercises.length,
+              exerciseNames: exercises.map((exercise) => exercise.exerciseName),
+              exercises,
             } satisfies PlanCard;
           }),
         );
@@ -164,8 +201,7 @@ export function WorkoutScreen({
         {plans.map((plan) => {
           const visibleExercises = plan.exerciseNames.slice(0, 3);
           const hiddenCount = Math.max(0, plan.exerciseCount - visibleExercises.length);
-          const hasDuration = plan.estimatedDurationMin !== null;
-          const hasCalories = plan.estimatedCaloriesKcal !== null;
+          const canStart = plan.exercises.length > 0;
 
           return (
             <article
@@ -190,9 +226,9 @@ export function WorkoutScreen({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {visibleExercises.map((exerciseName) => (
+                {visibleExercises.map((exerciseName, index) => (
                   <span
-                    key={`${plan.id}-${exerciseName}`}
+                    key={`${plan.id}-${exerciseName}-${index}`}
                     className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300"
                   >
                     {exerciseName}
@@ -205,28 +241,17 @@ export function WorkoutScreen({
                 ) : null}
               </div>
 
-              {hasDuration || hasCalories ? (
-                <div className="flex flex-wrap gap-2">
-                  {hasDuration ? (
-                    <span className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                      <span className="material-symbols-outlined text-sm">schedule</span>
-                      {plan.estimatedDurationMin} min
-                    </span>
-                  ) : null}
-                  {hasCalories ? (
-                    <span className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                      <span className="material-symbols-outlined text-sm">
-                        local_fire_department
-                      </span>
-                      {plan.estimatedCaloriesKcal} kcal
-                    </span>
-                  ) : null}
-                </div>
+              {!canStart ? (
+                <p className="text-xs text-amber-200">
+                  Cette seance ne contient pas encore d exercices.
+                </p>
               ) : null}
 
               <button
                 type="button"
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary font-extrabold text-background-dark shadow-lg shadow-primary/10 transition-all hover:bg-primary/90 active:scale-[0.98]"
+                onClick={() => onStartPlan(plan)}
+                disabled={!canStart}
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary font-extrabold text-background-dark shadow-lg shadow-primary/10 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="material-symbols-outlined">play_arrow</span>
                 DEMARRER

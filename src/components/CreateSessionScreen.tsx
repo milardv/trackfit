@@ -58,22 +58,6 @@ function getExerciseTarget(exercise: SessionExerciseSelection): string {
   return "Objectif libre";
 }
 
-function getEstimationSourceLabel(source: EstimationSource | null): string {
-  if (source === "gemini") {
-    return "Gemini";
-  }
-  if (source === "hybrid") {
-    return "Hybride";
-  }
-  if (source === "formula_fallback") {
-    return "Formule (secours)";
-  }
-  if (source === "formula") {
-    return "Formule";
-  }
-  return "N/A";
-}
-
 export function CreateSessionScreen({
   userId,
   onBack,
@@ -81,8 +65,8 @@ export function CreateSessionScreen({
   isSubmitting = false,
   errorMessage = null,
 }: CreateSessionScreenProps) {
-  const [name, setName] = useState("Seance Pecs & Dos");
-  const [gymName, setGymName] = useState("Keep Cool Lyon 3");
+  const [name, setName] = useState("Seance Haut du corps");
+  const [gymName, setGymName] = useState("Keep Cool rue d'Alger");
   const [availableExercises, setAvailableExercises] = useState<ExerciseOption[]>(
     [],
   );
@@ -90,7 +74,6 @@ export function CreateSessionScreen({
   const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState("");
   const [isLoadingExercises, setIsLoadingExercises] = useState(true);
-  const [isEstimatingMetrics, setIsEstimatingMetrics] = useState(false);
   const [sessionEstimate, setSessionEstimate] = useState<{
     estimatedDurationMin: number;
     estimatedCaloriesKcal: number;
@@ -192,12 +175,10 @@ export function CreateSessionScreen({
   useEffect(() => {
     if (selectedExercises.length === 0 || isLoadingExercises) {
       setSessionEstimate(null);
-      setIsEstimatingMetrics(false);
       return;
     }
 
     let cancelled = false;
-    setIsEstimatingMetrics(true);
 
     const timer = window.setTimeout(() => {
       void estimateSessionMetrics(estimationInput)
@@ -209,11 +190,6 @@ export function CreateSessionScreen({
         .catch(() => {
           if (!cancelled) {
             setSessionEstimate(null);
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setIsEstimatingMetrics(false);
           }
         });
     }, 300);
@@ -386,42 +362,6 @@ export function CreateSessionScreen({
           {isLoadingExercises ? (
             <div className="rounded-xl border border-white/10 bg-card-dark p-4 text-sm text-text-secondary">
               Chargement des exercices...
-            </div>
-          ) : null}
-
-          {selectedExercises.length > 0 ? (
-            <div className="rounded-xl border border-primary/20 bg-card-dark p-4">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold uppercase tracking-wider text-slate-300">
-                  Estimation de seance
-                </p>
-                <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-bold text-primary">
-                  {isEstimatingMetrics
-                    ? "Calcul..."
-                    : getEstimationSourceLabel(sessionEstimate?.estimationSource ?? null)}
-                </span>
-              </div>
-
-              {sessionEstimate ? (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-white/10 bg-[#1c2e21] px-3 py-2">
-                    <p className="text-xs text-slate-400">Duree estimee</p>
-                    <p className="text-base font-bold text-white">
-                      {sessionEstimate.estimatedDurationMin} min
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-white/10 bg-[#1c2e21] px-3 py-2">
-                    <p className="text-xs text-slate-400">Calories estimees</p>
-                    <p className="text-base font-bold text-white">
-                      {sessionEstimate.estimatedCaloriesKcal} kcal
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-slate-400">
-                  L estimation sera calculee des qu au moins un exercice est ajoute.
-                </p>
-              )}
             </div>
           ) : null}
 
