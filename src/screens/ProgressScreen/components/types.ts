@@ -34,5 +34,6 @@ export interface ProgressPhotosSectionProps {
   isUploadingPhoto: boolean;
   uploadError: string | null;
   uploadSuccess: string | null;
-  onAddPhoto: () => void;
+  onImportPhoto: () => void;
+  onTakePhoto: () => void;
 }

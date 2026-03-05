@@ -17,7 +17,8 @@ export function ProgressPhotosSection({
   isUploadingPhoto,
   uploadError,
   uploadSuccess,
-  onAddPhoto,
+  onImportPhoto,
+  onTakePhoto,
 }: ProgressPhotosSectionProps) {
   const [isOpen, setIsOpen] = useState(true);
 
@@ -49,17 +50,28 @@ export function ProgressPhotosSection({
 
         {isOpen ? (
           <div className="px-5 pb-5">
-            <button
-              type="button"
-              onClick={onAddPhoto}
-              disabled={isUploadingPhoto}
-              className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 py-4 text-sm font-bold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span className="material-symbols-outlined text-lg">
-                {isUploadingPhoto ? "progress_activity" : "add_a_photo"}
-              </span>
-              {isUploadingPhoto ? "Upload en cours..." : "Ajouter une photo"}
-            </button>
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={onImportPhoto}
+                disabled={isUploadingPhoto}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/10 py-4 text-sm font-bold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-lg">
+                  {isUploadingPhoto ? "progress_activity" : "photo_library"}
+                </span>
+                Importer
+              </button>
+              <button
+                type="button"
+                onClick={onTakePhoto}
+                disabled={isUploadingPhoto}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary py-4 text-sm font-bold text-background-dark transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-lg">photo_camera</span>
+                Camera
+              </button>
+            </div>
 
             {uploadError ? (
               <p className="mb-4 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">

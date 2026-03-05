@@ -70,7 +70,8 @@ export function ProgressScreen({
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetricEntry[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [photos, setPhotos] = useState<ProgressPhotoEntry[]>([]);
-  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const importPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraPhotoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,14 +156,24 @@ export function ProgressScreen({
     }
   };
 
-  const handleOpenPhotoPicker = () => {
+  const handleOpenImportPicker = () => {
     if (isUploadingPhoto) {
       return;
     }
 
     setPhotoUploadError(null);
     setPhotoUploadSuccess(null);
-    photoInputRef.current?.click();
+    importPhotoInputRef.current?.click();
+  };
+
+  const handleOpenCameraPicker = () => {
+    if (isUploadingPhoto) {
+      return;
+    }
+
+    setPhotoUploadError(null);
+    setPhotoUploadSuccess(null);
+    cameraPhotoInputRef.current?.click();
   };
 
   const handlePhotoSelected = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -234,9 +245,17 @@ export function ProgressScreen({
       </header>
 
       <input
-        ref={photoInputRef}
+        ref={importPhotoInputRef}
         type="file"
         accept="image/*"
+        className="hidden"
+        onChange={handlePhotoSelected}
+      />
+      <input
+        ref={cameraPhotoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
         className="hidden"
         onChange={handlePhotoSelected}
       />
@@ -284,7 +303,8 @@ export function ProgressScreen({
               isUploadingPhoto={isUploadingPhoto}
               uploadError={photoUploadError}
               uploadSuccess={photoUploadSuccess}
-              onAddPhoto={handleOpenPhotoPicker}
+              onImportPhoto={handleOpenImportPicker}
+              onTakePhoto={handleOpenCameraPicker}
             />
           </>
         ) : null}
