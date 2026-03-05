@@ -1,26 +1,28 @@
 import { useState } from "react";
 import type { User } from "firebase/auth";
-import { ActiveSessionScreen } from "../components/ActiveSessionScreen.tsx";
 import { BottomNav } from "../components/BottomNav.tsx";
 import {
   CreateSessionScreen,
   type SessionConfig,
-} from "../components/CreateSessionScreen.tsx";
+} from "../screens/CreateSessionScreen/index.tsx";
 import {
   ExerciseConfigScreen,
   type ExerciseConfig,
-} from "../components/ExerciseConfigScreen.tsx";
-import { HomeScreen } from "../components/HomeScreen.tsx";
-import { ProgressScreen } from "../components/ProgressScreen.tsx";
-import { QuickAddScreen } from "../components/QuickAddScreen.tsx";
-import { StatsScreen } from "../components/StatsScreen.tsx";
+} from "../screens/ExerciseConfigScreen/index.tsx";
+import { ActiveSessionScreen } from "../screens/ActiveSessionScreen/index.tsx";
+import { HomeScreen } from "../screens/HomeScreen/index.tsx";
+import { ProgressScreen } from "../screens/ProgressScreen/index.tsx";
+import { QuickAddScreen } from "../screens/QuickAddScreen/index.tsx";
+import { StatsScreen } from "../screens/StatsScreen/index.tsx";
 import {
   WorkoutScreen,
   type WorkoutPlanToStart,
-} from "../components/WorkoutScreen.tsx";
+} from "../screens/WorkoutScreen/index.tsx";
 import {
   createExercise,
   createPlanWithItems,
+  deletePlan,
+  updatePlanWithItems,
 } from "../services/firestoreService.ts";
 import type { Screen } from "./navigation.ts";
 
@@ -32,19 +34,32 @@ interface AppShellProps {
 
 interface RenderScreenOptions {
   user: User;
+  onSignOut: () => Promise<void>;
   onCreateSession: () => void;
   onStartPlan: (plan: WorkoutPlanToStart) => void;
+  onEditPlan: (plan: WorkoutPlanToStart) => void;
   workoutRefreshKey: number;
 }
 
 function renderScreen(screen: Screen, options: RenderScreenOptions) {
-  const { user, onCreateSession, onStartPlan, workoutRefreshKey } = options;
+  const {
+    user,
+    onSignOut,
+    onCreateSession,
+    onStartPlan,
+    onEditPlan,
+    workoutRefreshKey,
+  } =
+    options;
 
   if (screen === "home") {
     return (
       <HomeScreen
+        userId={user.uid}
         displayName={user.displayName ?? "Membre TrackFit"}
         photoURL={user.photoURL}
+        onCreateSession={onCreateSession}
+        onStartPlan={onStartPlan}
       />
     );
   }
@@ -55,6 +70,7 @@ function renderScreen(screen: Screen, options: RenderScreenOptions) {
         userId={user.uid}
         onCreateSession={onCreateSession}
         onStartPlan={onStartPlan}
+        onEditPlan={onEditPlan}
         refreshKey={workoutRefreshKey}
       />
     );
@@ -64,7 +80,15 @@ function renderScreen(screen: Screen, options: RenderScreenOptions) {
     return <StatsScreen userId={user.uid} />;
   }
 
-  return <ProgressScreen />;
+  return (
+    <ProgressScreen
+      userId={user.uid}
+      displayName={user.displayName ?? ""}
+      email={user.email ?? ""}
+      photoURL={user.photoURL}
+      onSignOut={onSignOut}
+    />
+  );
 }
 
 export function AppShell({ user, authError, onSignOut }: AppShellProps) {
@@ -77,11 +101,13 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   );
   const [isSessionConfigOpen, setIsSessionConfigOpen] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isDeletingSession, setIsDeletingSession] = useState(false);
   const [workoutRefreshKey, setWorkoutRefreshKey] = useState(0);
   const [sessionCreateError, setSessionCreateError] = useState<string | null>(
     null,
   );
   const [activePlan, setActivePlan] = useState<WorkoutPlanToStart | null>(null);
+  const [editingPlan, setEditingPlan] = useState<WorkoutPlanToStart | null>(null);
 
   const handleCreateExercise = () => {
     setExerciseCreateError(null);
@@ -132,13 +158,20 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   const handleCreateSession = () => {
     setIsQuickAddOpen(false);
     setSessionCreateError(null);
+    setEditingPlan(null);
     setIsSessionConfigOpen(true);
   };
 
   const handleBackFromSessionConfig = () => {
+    const wasEditing = Boolean(editingPlan);
     setSessionCreateError(null);
+    setEditingPlan(null);
     setIsSessionConfigOpen(false);
-    setIsQuickAddOpen(true);
+    if (!wasEditing) {
+      setIsQuickAddOpen(true);
+    } else {
+      setIsQuickAddOpen(false);
+    }
   };
 
   const handleSaveSessionConfig = async (
@@ -152,7 +185,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
     setIsCreatingSession(true);
 
     try {
-      await createPlanWithItems(user.uid, {
+      const planPayload = {
         name: config.name,
         gymName: config.gymName,
         estimatedDurationMin: config.estimatedDurationMin,
@@ -167,19 +200,58 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
           targetDurationSec: exercise.defaultDurationSec,
           restSec: exercise.defaultRestSec,
         })),
-      });
+      };
+
+      if (editingPlan) {
+        await updatePlanWithItems(user.uid, editingPlan.id, planPayload);
+      } else {
+        await createPlanWithItems(user.uid, planPayload);
+      }
 
       setCurrentScreen("workout");
       setIsSessionConfigOpen(false);
       setIsQuickAddOpen(false);
+      setEditingPlan(null);
       setWorkoutRefreshKey((value) => value + 1);
     } catch {
       setSessionCreateError(
-        "Impossible d enregistrer la seance pour le moment. Reessaie dans un instant.",
+        editingPlan
+          ? "Impossible de mettre a jour la seance pour le moment. Reessaie dans un instant."
+          : "Impossible d enregistrer la seance pour le moment. Reessaie dans un instant.",
       );
     } finally {
       setIsCreatingSession(false);
     }
+  };
+
+  const handleDeleteSessionConfig = async (): Promise<void> => {
+    if (!editingPlan || isDeletingSession) {
+      return;
+    }
+
+    setSessionCreateError(null);
+    setIsDeletingSession(true);
+
+    try {
+      await deletePlan(user.uid, editingPlan.id);
+      setIsSessionConfigOpen(false);
+      setIsQuickAddOpen(false);
+      setEditingPlan(null);
+      setWorkoutRefreshKey((value) => value + 1);
+    } catch {
+      setSessionCreateError(
+        "Impossible de supprimer la seance pour le moment. Reessaie dans un instant.",
+      );
+    } finally {
+      setIsDeletingSession(false);
+    }
+  };
+
+  const handleEditPlan = (plan: WorkoutPlanToStart) => {
+    setIsQuickAddOpen(false);
+    setSessionCreateError(null);
+    setEditingPlan(plan);
+    setIsSessionConfigOpen(true);
   };
 
   const handleStartPlan = (plan: WorkoutPlanToStart) => {
@@ -201,23 +273,12 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-background-dark text-text-primary font-display">
-      {currentScreen === "progress" ? (
-        <button
-          type="button"
-          onClick={() => {
-            void onSignOut();
-          }}
-          className="fixed right-4 top-4 z-[70] flex items-center gap-2 rounded-full border border-white/10 bg-card-dark/90 px-3 py-2 text-xs font-semibold text-text-primary backdrop-blur-md hover:border-primary/40 hover:text-primary"
-        >
-          <span className="material-symbols-outlined text-base">logout</span>
-          Deconnexion
-        </button>
-      ) : null}
-
       {renderScreen(currentScreen, {
         user,
+        onSignOut,
         onCreateSession: handleCreateSession,
         onStartPlan: handleStartPlan,
+        onEditPlan: handleEditPlan,
         workoutRefreshKey,
       })}
 
@@ -249,7 +310,34 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
           userId={user.uid}
           onBack={handleBackFromSessionConfig}
           onSave={handleSaveSessionConfig}
+          onDelete={editingPlan ? handleDeleteSessionConfig : undefined}
+          mode={editingPlan ? "edit" : "create"}
+          initialConfig={
+            editingPlan
+              ? {
+                  name: editingPlan.name,
+                  gymName: editingPlan.gymName,
+                  estimatedDurationMin: editingPlan.estimatedDurationMin,
+                  estimatedCaloriesKcal: editingPlan.estimatedCaloriesKcal,
+                  estimationSource: editingPlan.estimationSource,
+                  exercises: editingPlan.exercises
+                    .slice()
+                    .sort((a, b) => a.order - b.order)
+                    .map((exercise) => ({
+                      id: exercise.exerciseId,
+                      name: exercise.exerciseName,
+                      trackingMode: exercise.trackingMode,
+                      defaultSets: exercise.targetSets,
+                      defaultReps: exercise.targetReps,
+                      defaultWeightKg: exercise.targetWeightKg,
+                      defaultDurationSec: exercise.targetDurationSec,
+                      defaultRestSec: exercise.restSec,
+                    })),
+                }
+              : null
+          }
           isSubmitting={isCreatingSession}
+          isDeleting={isDeletingSession}
           errorMessage={sessionCreateError}
         />
       ) : null}

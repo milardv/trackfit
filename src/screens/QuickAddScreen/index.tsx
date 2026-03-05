@@ -1,10 +1,5 @@
 import { useEffect } from "react";
-
-interface QuickAddScreenProps {
-  onClose: () => void;
-  onCreateExercise: () => void;
-  onCreateSession: () => void;
-}
+import type { QuickAddScreenProps } from "./types.ts";
 
 export function QuickAddScreen({
   onClose,

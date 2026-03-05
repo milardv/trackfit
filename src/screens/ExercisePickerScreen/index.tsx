@@ -1,18 +1,6 @@
 import { useMemo } from "react";
-import type { ExerciseDoc, TrackingMode } from "../types/firestore.ts";
-
-export type ExercisePickerOption = ExerciseDoc & { id: string };
-
-interface ExercisePickerScreenProps {
-  exercises: ExercisePickerOption[];
-  selectedExerciseIds: string[];
-  searchQuery: string;
-  isLoading: boolean;
-  onSearchChange: (value: string) => void;
-  onClose: () => void;
-  onAddExercise: (exerciseId: string) => void;
-  onCreateExercise: () => void;
-}
+import type { TrackingMode } from "../../types/firestore.ts";
+import type { ExercisePickerScreenProps } from "./types.ts";
 
 function normalize(value: string): string {
   return value

@@ -1,64 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { TrackingMode } from "../types/firestore.ts";
+import type { TrackingMode } from "../../types/firestore.ts";
+import {
+  DURATION_MAX,
+  DURATION_MIN,
+  FOOTER_ITEMS,
+  REPS_MAX,
+  REPS_MIN,
+  REST_MAX,
+  REST_MIN,
+  SETS_MAX,
+  SETS_MIN,
+  WEIGHT_MAX,
+  WEIGHT_MIN,
+} from "./constants.ts";
+import type {
+  EffortPickerConfig,
+  EffortType,
+  ExerciseConfigScreenProps,
+} from "./types.ts";
+import { clamp, toNumber } from "./utils.ts";
+import { EffortPickerModal } from "./components/EffortPickerModal.tsx";
+import { ExerciseConfigFooterNav } from "./components/ExerciseConfigFooterNav.tsx";
 
-const SETS_MIN = 1;
-const SETS_MAX = 20;
-const WEIGHT_MIN = 0;
-const WEIGHT_MAX = 200;
-const REPS_MIN = 1;
-const REPS_MAX = 200;
-const DURATION_MIN = 5;
-const DURATION_MAX = 600;
-const REST_MIN = 10;
-const REST_MAX = 120;
-
-type EffortType = "reps" | "duration";
-
-interface FooterItem {
-  icon: string;
-  label: string;
-  isActive?: boolean;
-}
-
-const FOOTER_ITEMS: FooterItem[] = [
-  { icon: "home", label: "Accueil" },
-  { icon: "history", label: "Historique" },
-  { icon: "bar_chart", label: "Stats" },
-  { icon: "person", label: "Profil", isActive: true },
-];
-
-export interface ExerciseConfig {
-  name: string;
-  sets: number;
-  trackingMode: TrackingMode;
-  reps: number | null;
-  durationSec: number | null;
-  weightKg: number | null;
-  restSec: number;
-}
-
-interface ExerciseConfigScreenProps {
-  onBack: () => void;
-  onCreate: (config: ExerciseConfig) => Promise<void> | void;
-  isSubmitting?: boolean;
-  errorMessage?: string | null;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function toNumber(value: string): number | null {
-  const next = Number(value);
-  return Number.isFinite(next) ? next : null;
-}
+export type { ExerciseConfig } from "./types.ts";
 
 export function ExerciseConfigScreen({
   onBack,
   onCreate,
   isSubmitting = false,
   errorMessage = null,
+  zIndexClass = "z-[95]",
 }: ExerciseConfigScreenProps) {
   const [name, setName] = useState("Gainage");
   const [sets, setSets] = useState(3);
@@ -68,6 +40,7 @@ export function ExerciseConfigScreen({
   const [durationSec, setDurationSec] = useState(40);
   const [restSec, setRestSec] = useState(30);
   const [effortType, setEffortType] = useState<EffortType>("reps");
+  const [pickerType, setPickerType] = useState<EffortType | null>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -75,6 +48,10 @@ export function ExerciseConfigScreen({
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (pickerType !== null) {
+          setPickerType(null);
+          return;
+        }
         onBack();
       }
     };
@@ -85,7 +62,7 @@ export function ExerciseConfigScreen({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [onBack]);
+  }, [onBack, pickerType]);
 
   const restProgress = useMemo(() => {
     const ratio = (restSec - REST_MIN) / (REST_MAX - REST_MIN);
@@ -119,6 +96,57 @@ export function ExerciseConfigScreen({
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       setEffortType(nextType);
+      setPickerType(nextType);
+    }
+  };
+
+  const openEffortPicker = (nextType: EffortType) => {
+    setEffortType(nextType);
+    setPickerType(nextType);
+  };
+
+  const closeEffortPicker = () => {
+    setPickerType(null);
+  };
+
+  const pickerConfig = useMemo<EffortPickerConfig | null>(() => {
+    if (pickerType === "reps") {
+      return {
+        title: "Mouvements",
+        subtitle: "Choisis rapidement le nombre de repetitions.",
+        unitLabel: "reps",
+        value: reps,
+        min: REPS_MIN,
+        max: REPS_MAX,
+        step: 1,
+        presets: [8, 10, 12, 15, 20, 25],
+      };
+    }
+
+    if (pickerType === "duration") {
+      return {
+        title: "Duree",
+        subtitle: "Choisis rapidement la duree de l effort.",
+        unitLabel: "sec",
+        value: durationSec,
+        min: DURATION_MIN,
+        max: DURATION_MAX,
+        step: 5,
+        presets: [20, 30, 40, 45, 60, 90],
+      };
+    }
+
+    return null;
+  }, [durationSec, pickerType, reps]);
+
+  const updatePickerValue = (value: number) => {
+    if (pickerType === "reps") {
+      updateReps(value);
+      return;
+    }
+
+    if (pickerType === "duration") {
+      updateDuration(value);
     }
   };
 
@@ -148,8 +176,8 @@ export function ExerciseConfigScreen({
   };
 
   return (
-    <div className="fixed inset-0 z-[95] flex min-h-screen flex-col bg-background-dark text-text-primary">
-      <div className="relative flex h-full min-h-screen w-full flex-col overflow-hidden">
+    <div className={`fixed inset-0 ${zIndexClass} flex h-[100dvh] flex-col bg-background-dark text-text-primary`}>
+      <div className="relative mx-auto flex h-full w-full max-w-md flex-col overflow-hidden">
         <header className="sticky top-0 z-10 flex items-center justify-between border-b border-white/5 bg-background-dark/90 px-4 py-4 backdrop-blur-md">
           <button
             type="button"
@@ -167,7 +195,7 @@ export function ExerciseConfigScreen({
           <div className="size-10" />
         </header>
 
-        <main className="hide-scrollbar mx-auto flex w-full max-w-md flex-1 flex-col overflow-y-auto px-4 pb-32">
+        <main className="hide-scrollbar flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 pb-[calc(12rem+env(safe-area-inset-bottom))]">
           <div className="pb-6 pt-2">
             <h1 className="text-left text-[28px] font-bold leading-tight tracking-tight text-white">
               Personnalisez l&apos;effort
@@ -300,7 +328,7 @@ export function ExerciseConfigScreen({
                   role="button"
                   tabIndex={0}
                   aria-pressed={effortType === "reps"}
-                  onClick={() => setEffortType("reps")}
+                  onClick={() => openEffortPicker("reps")}
                   onKeyDown={(event) => onEffortCardKeyDown(event, "reps")}
                   className={`flex cursor-pointer flex-col gap-2 rounded-xl border p-4 text-left transition-opacity ${
                     effortType === "reps"
@@ -311,19 +339,11 @@ export function ExerciseConfigScreen({
                   <p className="text-xs font-semibold uppercase text-white">
                     Mouvements
                   </p>
-                  <div className="mt-2 flex items-center justify-center gap-2">
-                    <input
-                      type="number"
-                      value={reps}
-                      min={REPS_MIN}
-                      max={REPS_MAX}
-                      onFocus={() => setEffortType("reps")}
-                      onChange={(event) => {
-                        const next = toNumber(event.target.value);
-                        updateReps(next ?? REPS_MIN);
-                      }}
-                      className="w-full bg-transparent p-0 text-center text-2xl font-bold text-white outline-none"
-                    />
+                  <div className="mt-2 flex items-center justify-center gap-2 text-center">
+                    <p className="text-2xl font-bold text-white">{reps}</p>
+                    <span className="material-symbols-outlined text-base text-text-secondary">
+                      tune
+                    </span>
                   </div>
                   <p className="text-center text-[10px] font-medium italic text-text-secondary">
                     Reps
@@ -334,7 +354,7 @@ export function ExerciseConfigScreen({
                   role="button"
                   tabIndex={0}
                   aria-pressed={effortType === "duration"}
-                  onClick={() => setEffortType("duration")}
+                  onClick={() => openEffortPicker("duration")}
                   onKeyDown={(event) => onEffortCardKeyDown(event, "duration")}
                   className={`flex cursor-pointer flex-col gap-2 rounded-xl border p-4 text-left transition-opacity ${
                     effortType === "duration"
@@ -345,19 +365,11 @@ export function ExerciseConfigScreen({
                   <p className="text-xs font-semibold uppercase text-white">
                     Duree
                   </p>
-                  <div className="mt-2 flex items-center justify-center gap-2">
-                    <input
-                      type="number"
-                      value={durationSec}
-                      min={DURATION_MIN}
-                      max={DURATION_MAX}
-                      onFocus={() => setEffortType("duration")}
-                      onChange={(event) => {
-                        const next = toNumber(event.target.value);
-                        updateDuration(next ?? DURATION_MIN);
-                      }}
-                      className="w-full bg-transparent p-0 text-center text-2xl font-bold text-white outline-none"
-                    />
+                  <div className="mt-2 flex items-center justify-center gap-2 text-center">
+                    <p className="text-2xl font-bold text-white">{durationSec}</p>
+                    <span className="material-symbols-outlined text-base text-text-secondary">
+                      tune
+                    </span>
                   </div>
                   <p className="text-center text-[10px] font-medium italic text-text-secondary">
                     Secondes
@@ -432,40 +444,14 @@ export function ExerciseConfigScreen({
           ) : null}
         </main>
 
-        <footer className="fixed bottom-0 left-0 z-20 w-full border-t border-white/5 bg-background-dark/95 px-4 pb-6 pt-2 backdrop-blur-lg">
-          <div className="mx-auto w-full max-w-md">
-            <div className="flex justify-between items-end">
-              {FOOTER_ITEMS.map((item) => (
-                <div
-                  key={item.label}
-                  className="flex flex-1 flex-col items-center justify-end gap-1"
-                >
-                  <div
-                    className={`flex h-8 items-center justify-center ${
-                      item.isActive
-                        ? "text-white"
-                        : "text-text-secondary"
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[24px]">
-                      {item.icon}
-                    </span>
-                  </div>
-                  <p
-                    className={`text-xs font-medium leading-normal ${
-                      item.isActive
-                        ? "text-white"
-                        : "text-text-secondary"
-                    }`}
-                  >
-                    {item.label}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </footer>
+        <ExerciseConfigFooterNav items={FOOTER_ITEMS} />
       </div>
+
+      <EffortPickerModal
+        pickerConfig={pickerConfig}
+        onClose={closeEffortPicker}
+        onUpdateValue={updatePickerValue}
+      />
     </div>
   );
 }

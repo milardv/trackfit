@@ -1,66 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { WorkoutPlanCard } from "../../components/WorkoutPlanCard.tsx";
 import {
   listExercises,
   listPlanItems,
   listPlans,
-} from "../services/firestoreService.ts";
-import type { EstimationSource, TrackingMode } from "../types/firestore.ts";
-
-interface WorkoutScreenProps {
-  userId: string;
-  onCreateSession: () => void;
-  onStartPlan: (plan: WorkoutPlanToStart) => void;
-  refreshKey?: number;
-}
-
-export interface WorkoutPlanExercise {
-  key: string;
-  exerciseId: string;
-  exerciseName: string;
-  order: number;
-  trackingMode: TrackingMode;
-  targetSets: number;
-  targetReps: number | null;
-  targetWeightKg: number | null;
-  targetDurationSec: number | null;
-  restSec: number;
-}
-
-export interface WorkoutPlanToStart {
-  id: string;
-  name: string;
-  gymName: string;
-  estimatedDurationMin: number | null;
-  estimatedCaloriesKcal: number | null;
-  estimationSource: EstimationSource | null;
-  exercises: WorkoutPlanExercise[];
-}
-
-interface PlanCard extends WorkoutPlanToStart {
-  exerciseCount: number;
-  exerciseNames: string[];
-}
-
-function normalizeGymLabel(gymName: string): string {
-  const trimmed = gymName.trim();
-  if (!trimmed) {
-    return "Salle";
-  }
-  return trimmed;
-}
-
-function getGymIcon(gymName: string): "location_on" | "home_pin" {
-  return gymName.toLowerCase().includes("maison") ? "home_pin" : "location_on";
-}
-
-function getGymTone(gymName: string): string {
-  return gymName.toLowerCase().includes("maison") ? "text-slate-400" : "text-primary";
-}
+} from "../../services/firestoreService.ts";
+import type {
+  PlanCard,
+  WorkoutPlanExercise,
+  WorkoutPlanToStart,
+  WorkoutScreenProps,
+} from "./types.ts";
+import { normalizeGymLabel } from "./utils.ts";
+export type { WorkoutPlanExercise, WorkoutPlanToStart } from "./types.ts";
 
 export function WorkoutScreen({
   userId,
   onCreateSession,
   onStartPlan,
+  onEditPlan,
   refreshKey = 0,
 }: WorkoutScreenProps) {
   const [plans, setPlans] = useState<PlanCard[]>([]);
@@ -144,6 +103,16 @@ export function WorkoutScreen({
 
   const hasPlans = useMemo(() => plans.length > 0, [plans.length]);
 
+  const onPlanCardKeyDown = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    plan: WorkoutPlanToStart,
+  ) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onEditPlan(plan);
+    }
+  };
+
   return (
     <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col bg-background-dark pb-24 text-text-primary">
       <header className="sticky top-0 z-30 border-b border-white/5 bg-background-dark/80 px-6 py-6 backdrop-blur-xl">
@@ -199,64 +168,23 @@ export function WorkoutScreen({
         ) : null}
 
         {plans.map((plan) => {
-          const visibleExercises = plan.exerciseNames.slice(0, 3);
-          const hiddenCount = Math.max(0, plan.exerciseCount - visibleExercises.length);
           const canStart = plan.exercises.length > 0;
 
           return (
-            <article
+            <WorkoutPlanCard
               key={plan.id}
-              className="flex flex-col gap-5 rounded-2xl border border-white/5 bg-card-dark p-5 shadow-sm"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex flex-col gap-1">
-                  <div className={`flex items-center gap-2 ${getGymTone(plan.gymName)}`}>
-                    <span className="material-symbols-outlined text-sm">
-                      {getGymIcon(plan.gymName)}
-                    </span>
-                    <span className="text-xs font-bold uppercase tracking-wider">
-                      {plan.gymName}
-                    </span>
-                  </div>
-                  <h3 className="text-xl font-bold text-white">{plan.name}</h3>
-                </div>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-400">
-                  {plan.exerciseCount} exercices
-                </span>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {visibleExercises.map((exerciseName, index) => (
-                  <span
-                    key={`${plan.id}-${exerciseName}-${index}`}
-                    className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300"
-                  >
-                    {exerciseName}
-                  </span>
-                ))}
-                {hiddenCount > 0 ? (
-                  <span className="px-2 py-1 text-xs font-medium text-slate-400">
-                    +{hiddenCount} autres
-                  </span>
-                ) : null}
-              </div>
-
-              {!canStart ? (
-                <p className="text-xs text-amber-200">
-                  Cette seance ne contient pas encore d exercices.
-                </p>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={() => onStartPlan(plan)}
-                disabled={!canStart}
-                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary font-extrabold text-background-dark shadow-lg shadow-primary/10 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="material-symbols-outlined">play_arrow</span>
-                DEMARRER
-              </button>
-            </article>
+              name={plan.name}
+              gymName={plan.gymName}
+              exerciseCount={plan.exerciseCount}
+              exerciseNames={plan.exerciseNames}
+              canStart={canStart}
+              onCardClick={() => onEditPlan(plan)}
+              onCardKeyDown={(event) => onPlanCardKeyDown(event, plan)}
+              onStart={(event) => {
+                event.stopPropagation();
+                onStartPlan(plan);
+              }}
+            />
           );
         })}
       </main>

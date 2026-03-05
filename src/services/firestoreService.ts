@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -192,6 +193,7 @@ export interface AddBodyMetricInput {
   measuredAt?: Timestamp;
   weightKg: number;
   bodyFatPct?: number | null;
+  musclePct?: number | null;
   muscleMassKg?: number | null;
   note?: string;
 }
@@ -380,6 +382,23 @@ export async function listBodyMetrics(
   }));
 }
 
+export async function listProgressPhotos(
+  uid: string,
+  maxItems = 60,
+): Promise<Array<ProgressPhotoDoc & { id: string }>> {
+  const photosQuery = query(
+    progressPhotosCollectionRef(uid),
+    orderBy("takenAt", "desc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(photosQuery);
+
+  return snapshot.docs.map((document) => ({
+    id: document.id,
+    ...(document.data() as ProgressPhotoDoc),
+  }));
+}
+
 export async function createPlan(
   uid: string,
   input: CreatePlanInput,
@@ -446,6 +465,94 @@ export async function createPlanWithItems(
 
   await batch.commit();
   return planReference.id;
+}
+
+export async function updatePlanWithItems(
+  uid: string,
+  planId: string,
+  input: CreatePlanWithItemsInput,
+): Promise<void> {
+  const planReference = planDocRef(uid, planId);
+  const existingItemsSnapshot = await getDocs(planItemsCollectionRef(uid, planId));
+  const batch = writeBatch(db);
+  const hasEstimate =
+    input.estimatedDurationMin !== undefined ||
+    input.estimatedCaloriesKcal !== undefined;
+
+  const planPatch: PartialWithFieldValue<PlanDoc> = {
+    name: input.name,
+    gymName: input.gymName,
+    isActive: input.isActive ?? true,
+    estimatedDurationMin: input.estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: input.estimatedCaloriesKcal ?? null,
+    estimationSource: input.estimationSource ?? null,
+    estimatedAt: input.estimatedAt ?? (hasEstimate ? serverTimestamp() : null),
+    updatedAt: serverTimestamp(),
+  };
+  batch.set(planReference, planPatch, { merge: true });
+
+  existingItemsSnapshot.docs.forEach((documentSnapshot) => {
+    batch.delete(documentSnapshot.ref);
+  });
+
+  input.items.forEach((item, index) => {
+    const planItemReference = doc(planItemsCollectionRef(uid, planId));
+    const planItemPayload: WithFieldValue<PlanItemDoc> = {
+      order: item.order ?? index + 1,
+      exerciseId: item.exerciseId,
+      targetSets: Math.max(1, item.targetSets),
+      targetReps: item.targetReps ?? null,
+      targetWeightKg: item.targetWeightKg ?? null,
+      targetDurationSec: item.targetDurationSec ?? null,
+      restSec: Math.max(5, item.restSec),
+      notes: item.notes ?? "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    batch.set(planItemReference, planItemPayload);
+  });
+
+  await batch.commit();
+}
+
+export async function deletePlan(uid: string, planId: string): Promise<void> {
+  const planPatch: PartialWithFieldValue<PlanDoc> = {
+    isActive: false,
+    updatedAt: serverTimestamp(),
+  };
+  await setDoc(planDocRef(uid, planId), planPatch, { merge: true });
+}
+
+export async function deleteSession(uid: string, sessionId: string): Promise<void> {
+  const sessionReference = sessionDocRef(uid, sessionId);
+  const sessionSnapshot = await getDoc(sessionReference);
+
+  if (!sessionSnapshot.exists()) {
+    throw new Error(`Session "${sessionId}" introuvable.`);
+  }
+
+  const exercisesSnapshot = await getDocs(sessionExercisesCollectionRef(uid, sessionId));
+
+  for (const exerciseDoc of exercisesSnapshot.docs) {
+    const setsSnapshot = await getDocs(setsCollectionRef(uid, sessionId, exerciseDoc.id));
+
+    for (const setDocSnapshot of setsSnapshot.docs) {
+      await deleteDoc(setDocSnapshot.ref);
+    }
+
+    await deleteDoc(exerciseDoc.ref);
+  }
+
+  const activeReference = activeSessionDocRef(uid);
+  const activeSnapshot = await getDoc(activeReference);
+  if (activeSnapshot.exists()) {
+    const activeSession = activeSnapshot.data() as ActiveSessionDoc;
+    if (activeSession.sessionId === sessionId) {
+      await deleteDoc(activeReference);
+    }
+  }
+
+  await deleteDoc(sessionReference);
 }
 
 export async function addPlanItem(
@@ -766,6 +873,7 @@ export async function addBodyMetric(
     measuredAt: input.measuredAt ?? Timestamp.now(),
     weightKg: input.weightKg,
     bodyFatPct: input.bodyFatPct ?? null,
+    musclePct: input.musclePct ?? null,
     muscleMassKg: input.muscleMassKg ?? null,
     note: input.note ?? "",
     createdAt: serverTimestamp(),

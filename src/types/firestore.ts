@@ -124,6 +124,7 @@ export interface BodyMetricDoc extends TimestampedDoc {
   measuredAt: Timestamp;
   weightKg: number;
   bodyFatPct: number | null;
+  musclePct: number | null;
   muscleMassKg: number | null;
   note: string;
 }
