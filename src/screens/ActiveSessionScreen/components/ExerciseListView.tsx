@@ -7,10 +7,12 @@ export function ExerciseListView({
   totalCount,
   exercises,
   isBusy,
+  isAddExerciseDisabled,
   allExercisesCompleted,
   isSessionCompleted,
   isFinalizingSession,
   onStartExercise,
+  onAddExercise,
   onFinalizeSession,
   onOpenSummary,
 }: ExerciseListViewProps) {
@@ -29,6 +31,16 @@ export function ExerciseListView({
           Progression: {completedCount}/{totalCount} exercices termines
         </p>
       </div>
+
+      <button
+        type="button"
+        onClick={onAddExercise}
+        disabled={isAddExerciseDisabled}
+        className="flex h-12 items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10 text-sm font-bold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="material-symbols-outlined text-lg">add_circle</span>
+        Ajouter un exercice a cette seance
+      </button>
 
       <div className="space-y-3">
         {exercises.map((exercise) => {

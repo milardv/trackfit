@@ -1,52 +1,71 @@
-interface ImgBbApiResponse {
-  success?: boolean;
-  data?: {
-    url?: string;
-    display_url?: string;
-    thumb?: {
-      url?: string;
-    };
-  };
-  error?: {
-    message?: string;
-  };
-}
-
 export interface UploadedImageResult {
   imageUrl: string;
   thumbnailUrl: string | null;
 }
 
-const IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload";
-
-function readImgBbApiKey(): string {
-  const key = import.meta.env["VITE_IMGBB_API_KEY"];
-  if (typeof key === "string" && key.trim().length > 0) {
-    return key.trim();
-  }
-  throw new Error("La cle API ImgBB est manquante (VITE_IMGBB_API_KEY).");
+interface CloudinaryUploadResponse {
+  secure_url?: string;
+  error?: {
+    message?: string;
+  };
 }
 
-export async function uploadToImgBB(file: File): Promise<UploadedImageResult> {
-  const apiKey = readImgBbApiKey();
-  const formData = new FormData();
-  formData.append("key", apiKey);
-  formData.append("image", file);
-  formData.append("name", file.name);
+interface CloudinaryConfig {
+  cloudName: string;
+  uploadPreset: string;
+  apiKey: string;
+}
 
-  const response = await fetch(IMGBB_UPLOAD_URL, {
+const VITE_CLOUDINARY_API_KEY="967521426526283"
+const VITE_CLOUDINARY_CLOUD_NAME="dagxzno9s"
+const VITE_CLOUDINARY_UPLOAD_PRESET="trackfit"
+
+function readCloudinaryConfig(): CloudinaryConfig {
+  const cloudName = VITE_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = VITE_CLOUDINARY_UPLOAD_PRESET;
+  const apiKey = VITE_CLOUDINARY_API_KEY;
+
+  if (typeof cloudName !== "string" || cloudName.trim().length === 0) {
+    throw new Error("Cloudinary: VITE_CLOUDINARY_CLOUD_NAME manquant.");
+  }
+  if (typeof uploadPreset !== "string" || uploadPreset.trim().length === 0) {
+    throw new Error("Cloudinary: VITE_CLOUDINARY_UPLOAD_PRESET manquant.");
+  }
+  if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
+    throw new Error("Cloudinary: VITE_CLOUDINARY_API_KEY manquant.");
+  }
+
+  return {
+    cloudName: cloudName.trim(),
+    uploadPreset: uploadPreset.trim(),
+    apiKey: apiKey.trim(),
+  };
+}
+
+export async function uploadToCloudinary(file: File): Promise<UploadedImageResult> {
+  const config = readCloudinaryConfig();
+  const uploadUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(config.cloudName)}/image/upload`;
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", config.uploadPreset);
+  formData.append("api_key", config.apiKey);
+  formData.append("filename_override", file.name);
+  formData.append("folder", "trackfit/progress");
+
+  const response = await fetch(uploadUrl, {
     method: "POST",
     body: formData,
   });
 
-  const json = (await response.json()) as ImgBbApiResponse;
-  if (!response.ok || !json.success || !json.data?.url) {
+  const json = (await response.json()) as CloudinaryUploadResponse;
+  if (!response.ok || !json.secure_url) {
     const apiMessage = json.error?.message;
-    throw new Error(apiMessage ?? "Upload ImgBB impossible.");
+    throw new Error(apiMessage ?? "Upload Cloudinary impossible.");
   }
 
   return {
-    imageUrl: json.data.url,
-    thumbnailUrl: json.data.thumb?.url ?? json.data.display_url ?? null,
+    // We keep the original delivery URL without transformation for no compression.
+    imageUrl: json.secure_url,
+    thumbnailUrl: json.secure_url,
   };
 }

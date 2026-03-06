@@ -14,10 +14,12 @@ export interface ExerciseListViewProps {
   totalCount: number;
   exercises: RuntimeExercise[];
   isBusy: boolean;
+  isAddExerciseDisabled: boolean;
   allExercisesCompleted: boolean;
   isSessionCompleted: boolean;
   isFinalizingSession: boolean;
   onStartExercise: (exerciseKey: string) => void;
+  onAddExercise: () => void;
   onFinalizeSession: () => void;
   onOpenSummary: () => void;
 }

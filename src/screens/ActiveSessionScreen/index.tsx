@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ExercisePickerScreen } from "../ExercisePickerScreen/index.tsx";
+import type { ExercisePickerOption } from "../ExercisePickerScreen/types.ts";
 import {
+  ExerciseConfigScreen,
+  type ExerciseConfig,
+} from "../ExerciseConfigScreen/index.tsx";
+import {
+  createExercise,
   clearRestTimer,
   endExercise,
   endSession,
+  listExercises,
   logSet,
   startExercise,
   startRestAfterSet,
@@ -20,6 +28,13 @@ import { ExerciseActiveView } from "./components/ExerciseActiveView.tsx";
 import { ExerciseListView } from "./components/ExerciseListView.tsx";
 import { SessionDoneView } from "./components/SessionDoneView.tsx";
 
+function createRuntimeExerciseKey(exerciseId: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${exerciseId}-${crypto.randomUUID()}`;
+  }
+  return `${exerciseId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function ActiveSessionScreen({
   userId,
   plan,
@@ -36,6 +51,15 @@ export function ActiveSessionScreen({
   const [isSessionCompleted, setIsSessionCompleted] = useState(false);
   const [hasAutoFinalizeAttempted, setHasAutoFinalizeAttempted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
+  const [exerciseSearchQuery, setExerciseSearchQuery] = useState("");
+  const [availableExercises, setAvailableExercises] = useState<ExercisePickerOption[]>([]);
+  const [isLoadingExercises, setIsLoadingExercises] = useState(false);
+  const [isExerciseConfigOpen, setIsExerciseConfigOpen] = useState(false);
+  const [returnToPickerAfterExerciseConfig, setReturnToPickerAfterExerciseConfig] =
+    useState(false);
+  const [isCreatingExercise, setIsCreatingExercise] = useState(false);
+  const [exerciseCreateError, setExerciseCreateError] = useState<string | null>(null);
 
   const [exercises, setExercises] = useState<RuntimeExercise[]>(() =>
     plan.exercises
@@ -75,6 +99,38 @@ export function ActiveSessionScreen({
     }
   }, [nowMs, restEndsAtMs]);
 
+  useEffect(() => {
+    if (!isExercisePickerOpen) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingExercises(true);
+
+    void listExercises(userId)
+      .then((items) => {
+        if (!cancelled) {
+          setAvailableExercises(items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setErrorMessage(
+            "Impossible de charger les exercices pour le moment. Reessaie.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingExercises(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isExercisePickerOpen, userId]);
+
   const activeExercise = useMemo(
     () => exercises.find((exercise) => exercise.key === activeExerciseKey) ?? null,
     [activeExerciseKey, exercises],
@@ -104,6 +160,10 @@ export function ActiveSessionScreen({
     activeExercise !== null && activeExercise.loggedSets.length >= activeExercise.targetSets;
 
   const allExercisesCompleted = totalCount > 0 && completedCount === totalCount;
+  const selectedExerciseIds = useMemo(
+    () => exercises.map((exercise) => exercise.exerciseId),
+    [exercises],
+  );
 
   const finalizeSession = useCallback(async () => {
     if (!sessionId || isFinalizingSession || isSessionCompleted) {
@@ -182,6 +242,118 @@ export function ActiveSessionScreen({
     });
     setSessionId(createdSessionId);
     return createdSessionId;
+  };
+
+  const openExercisePicker = () => {
+    if (isBusy || isFinalizingSession || isSessionCompleted) {
+      return;
+    }
+    setErrorMessage(null);
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(true);
+  };
+
+  const closeExercisePicker = () => {
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(false);
+  };
+
+  const handleAddExerciseToCurrentSession = (
+    exerciseId: string,
+    sourceExercises: ExercisePickerOption[] = availableExercises,
+  ) => {
+    const selectedExercise = sourceExercises.find((item) => item.id === exerciseId);
+    if (!selectedExercise) {
+      return;
+    }
+
+    setExercises((previous) => {
+      if (previous.some((item) => item.exerciseId === exerciseId)) {
+        return previous;
+      }
+
+      const nextOrder =
+        previous.reduce((maxOrder, item) => Math.max(maxOrder, item.order), 0) + 1;
+
+      return [
+        ...previous,
+        {
+          key: createRuntimeExerciseKey(selectedExercise.id),
+          exerciseId: selectedExercise.id,
+          exerciseName: selectedExercise.name,
+          order: nextOrder,
+          trackingMode: selectedExercise.trackingMode,
+          targetSets: selectedExercise.defaultSets,
+          targetReps: selectedExercise.defaultReps,
+          targetWeightKg: selectedExercise.defaultWeightKg,
+          targetDurationSec: selectedExercise.defaultDurationSec,
+          restSec: selectedExercise.defaultRestSec,
+          status: "pending",
+          sessionExerciseId: null,
+          startedAtMs: null,
+          loggedSets: [],
+        },
+      ];
+    });
+
+    setHasAutoFinalizeAttempted(false);
+    setIsSessionCompleted(false);
+    setErrorMessage(null);
+    closeExercisePicker();
+  };
+
+  const handleCreateExerciseFromPicker = () => {
+    setExerciseCreateError(null);
+    closeExercisePicker();
+    setReturnToPickerAfterExerciseConfig(true);
+    setIsExerciseConfigOpen(true);
+  };
+
+  const handleBackFromExerciseConfig = () => {
+    setIsExerciseConfigOpen(false);
+    setExerciseCreateError(null);
+
+    if (returnToPickerAfterExerciseConfig) {
+      setReturnToPickerAfterExerciseConfig(false);
+      setIsExercisePickerOpen(true);
+    }
+  };
+
+  const handleCreateExerciseFromConfig = async (
+    config: ExerciseConfig,
+  ): Promise<void> => {
+    if (isCreatingExercise) {
+      return;
+    }
+
+    setIsCreatingExercise(true);
+    setExerciseCreateError(null);
+
+    try {
+      const createdExerciseId = await createExercise(userId, {
+        name: config.name,
+        category: "personnalise",
+        trackingMode: config.trackingMode,
+        defaultSets: config.sets,
+        defaultReps: config.reps,
+        defaultWeightKg: config.weightKg,
+        defaultDurationSec: config.durationSec,
+        defaultRestSec: config.restSec,
+      });
+
+      const refreshedExercises = await listExercises(userId);
+      setAvailableExercises(refreshedExercises);
+      handleAddExerciseToCurrentSession(createdExerciseId, refreshedExercises);
+
+      setIsExerciseConfigOpen(false);
+      setReturnToPickerAfterExerciseConfig(false);
+    } catch {
+      setExerciseCreateError(
+        "Impossible de creer l exercice pour le moment. Reessaie dans un instant.",
+      );
+    } finally {
+      setIsCreatingExercise(false);
+    }
   };
 
   const handleStartExercise = async (exerciseKey: string) => {
@@ -437,6 +609,16 @@ export function ActiveSessionScreen({
   };
 
   const handleBackAction = () => {
+    if (isExerciseConfigOpen) {
+      handleBackFromExerciseConfig();
+      return;
+    }
+
+    if (isExercisePickerOpen) {
+      closeExercisePicker();
+      return;
+    }
+
     if (view === "exercise_active") {
       setView("exercise_list");
       return;
@@ -476,9 +658,11 @@ export function ActiveSessionScreen({
           totalCount={totalCount}
           exercises={exercises}
           isBusy={isBusy}
+          isAddExerciseDisabled={isBusy || isFinalizingSession || isSessionCompleted}
           allExercisesCompleted={allExercisesCompleted}
           isSessionCompleted={isSessionCompleted}
           isFinalizingSession={isFinalizingSession}
+          onAddExercise={openExercisePicker}
           onStartExercise={(exerciseKey) => {
             void handleStartExercise(exerciseKey);
           }}
@@ -515,6 +699,29 @@ export function ActiveSessionScreen({
 
       {view === "session_done" ? (
         <SessionDoneView completedCount={completedCount} onClose={onClose} />
+      ) : null}
+
+      {isExercisePickerOpen ? (
+        <ExercisePickerScreen
+          exercises={availableExercises}
+          selectedExerciseIds={selectedExerciseIds}
+          searchQuery={exerciseSearchQuery}
+          isLoading={isLoadingExercises}
+          onSearchChange={setExerciseSearchQuery}
+          onClose={closeExercisePicker}
+          onAddExercise={handleAddExerciseToCurrentSession}
+          onCreateExercise={handleCreateExerciseFromPicker}
+        />
+      ) : null}
+
+      {isExerciseConfigOpen ? (
+        <ExerciseConfigScreen
+          onBack={handleBackFromExerciseConfig}
+          onCreate={handleCreateExerciseFromConfig}
+          isSubmitting={isCreatingExercise}
+          errorMessage={exerciseCreateError}
+          zIndexClass="z-[110]"
+        />
       ) : null}
 
       {errorMessage ? (

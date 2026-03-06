@@ -4,11 +4,12 @@ import { getDownloadURL, ref as storageRef } from "firebase/storage";
 import { storage } from "../../firebase.ts";
 import {
   addProgressPhoto,
+  deleteProgressPhoto,
   listBodyMetrics,
   listProgressPhotos,
   listSessions,
 } from "../../services/firestoreService.ts";
-import { uploadToImgBB } from "../../services/imageUploadService.ts";
+import { uploadToCloudinary } from "../../services/imageUploadService.ts";
 import type {
   BodyMetricEntry,
   PeriodOption,
@@ -24,6 +25,7 @@ import {
   toMillis,
 } from "./utils.ts";
 import { BodyCompositionCards } from "./components/BodyCompositionCards.tsx";
+import { PhotoGalleryScreen } from "./components/PhotoGalleryScreen.tsx";
 import { ProfileIdentityCard } from "./components/ProfileIdentityCard.tsx";
 import { ProgressPhotosSection } from "./components/ProgressPhotosSection.tsx";
 import { WeightHistorySection } from "./components/WeightHistorySection.tsx";
@@ -64,9 +66,11 @@ export function ProgressScreen({
   const [isLoading, setIsLoading] = useState(true);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [photoUploadSuccess, setPhotoUploadSuccess] = useState<string | null>(null);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetricEntry[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [photos, setPhotos] = useState<ProgressPhotoEntry[]>([]);
@@ -128,6 +132,7 @@ export function ProgressScreen({
   }, [userId]);
 
   const summary = useMemo(() => computeWeightSummary(bodyMetrics), [bodyMetrics]);
+  const latestBodyMetric = useMemo(() => bodyMetrics[0] ?? null, [bodyMetrics]);
   const sessionSummary = useMemo(() => computeSessionSummary(sessions), [sessions]);
   const chartPoints = useMemo(
     () => buildWeightChartPoints(bodyMetrics, period),
@@ -157,7 +162,7 @@ export function ProgressScreen({
   };
 
   const handleOpenImportPicker = () => {
-    if (isUploadingPhoto) {
+    if (isUploadingPhoto || deletingPhotoId !== null) {
       return;
     }
 
@@ -167,7 +172,7 @@ export function ProgressScreen({
   };
 
   const handleOpenCameraPicker = () => {
-    if (isUploadingPhoto) {
+    if (isUploadingPhoto || deletingPhotoId !== null) {
       return;
     }
 
@@ -201,12 +206,19 @@ export function ProgressScreen({
     setPhotoUploadSuccess(null);
 
     try {
-      const uploaded = await uploadToImgBB(file);
+      const uploaded = await uploadToCloudinary(file);
       const takenAt = Timestamp.now();
+      const currentWeightKg = latestBodyMetric?.weightKg ?? null;
+      const currentBodyFatPct =
+        typeof latestBodyMetric?.bodyFatPct === "number"
+          ? latestBodyMetric.bodyFatPct
+          : null;
       const photoId = await addProgressPhoto(userId, {
         takenAt,
         storagePath: uploaded.imageUrl,
         thumbnailPath: uploaded.thumbnailUrl,
+        weightKgSnapshot: currentWeightKg,
+        bodyFatPctSnapshot: currentBodyFatPct,
       });
 
       const localEntry: ProgressPhotoEntry = {
@@ -214,8 +226,8 @@ export function ProgressScreen({
         takenAt,
         storagePath: uploaded.imageUrl,
         thumbnailPath: uploaded.thumbnailUrl,
-        weightKgSnapshot: null,
-        bodyFatPctSnapshot: null,
+        weightKgSnapshot: currentWeightKg,
+        bodyFatPctSnapshot: currentBodyFatPct,
         note: "",
         createdAt: takenAt,
         updatedAt: takenAt,
@@ -238,12 +250,34 @@ export function ProgressScreen({
     }
   };
 
+  const handleDeletePhoto = async (photoId: string) => {
+    if (isUploadingPhoto || deletingPhotoId !== null) {
+      return;
+    }
+
+    const shouldDelete = window.confirm("Supprimer cette photo de progression ?");
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingPhotoId(photoId);
+    setPhotoUploadError(null);
+    setPhotoUploadSuccess(null);
+
+    try {
+      await deleteProgressPhoto(userId, photoId);
+      setPhotos((current) => current.filter((photo) => photo.id !== photoId));
+      setPhotoUploadSuccess("Photo supprimee.");
+    } catch {
+      setPhotoUploadError("Impossible de supprimer la photo pour le moment.");
+      setPhotoUploadSuccess(null);
+    } finally {
+      setDeletingPhotoId(null);
+    }
+  };
+
   return (
     <div className="relative flex min-h-screen w-full flex-col bg-background-dark pb-24 text-text-primary">
-      <header className="sticky top-0 z-20 flex items-center justify-center border-b border-white/5 bg-background-dark/90 px-4 py-4 backdrop-blur-md">
-        <h1 className="text-lg font-bold tracking-tight text-white">Profil et progres physique</h1>
-      </header>
-
       <input
         ref={importPhotoInputRef}
         type="file"
@@ -260,55 +294,82 @@ export function ProgressScreen({
         onChange={handlePhotoSelected}
       />
 
-      <main className="flex flex-col gap-6 p-4 pb-8">
-        {isLoading ? (
-          <div className="rounded-2xl border border-white/5 bg-card-dark p-4 text-sm text-text-secondary">
-            Chargement du profil...
-          </div>
-        ) : null}
+      {isGalleryOpen ? (
+        <PhotoGalleryScreen
+          photos={photos}
+          currentWeightKg={summary.currentWeightKg}
+          deletingPhotoId={deletingPhotoId}
+          onBack={() => setIsGalleryOpen(false)}
+          onOpenImportPhoto={handleOpenImportPicker}
+          onDeletePhoto={(photoId) => {
+            void handleDeletePhoto(photoId);
+          }}
+        />
+      ) : (
+        <>
+          <header className="sticky top-0 z-20 flex items-center justify-center border-b border-white/5 bg-background-dark/90 px-4 py-4 backdrop-blur-md">
+            <h1 className="text-lg font-bold tracking-tight text-white">
+              Profil et progres physique
+            </h1>
+          </header>
 
-        {errorMessage ? (
-          <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">
-            {errorMessage}
-          </div>
-        ) : null}
+          <main className="flex flex-col gap-6 p-4 pb-8">
+            {isLoading ? (
+              <div className="rounded-2xl border border-white/5 bg-card-dark p-4 text-sm text-text-secondary">
+                Chargement du profil...
+              </div>
+            ) : null}
 
-        {!isLoading ? (
-          <>
-            <ProfileIdentityCard
-              displayName={resolvedDisplayName}
-              email={resolvedEmail}
-              photoURL={resolvedPhoto}
-              completedSessions={sessionSummary.completedCount}
-              thisMonthSessions={sessionSummary.thisMonthCount}
-              onSignOut={() => {
-                void handleSignOut();
-              }}
-              isSigningOut={isSigningOut}
-            />
+            {errorMessage ? (
+              <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 p-4 text-sm text-rose-200">
+                {errorMessage}
+              </div>
+            ) : null}
 
-            <BodyCompositionCards summary={summary} />
+            {!isLoading ? (
+              <>
+                <ProfileIdentityCard
+                  displayName={resolvedDisplayName}
+                  email={resolvedEmail}
+                  photoURL={resolvedPhoto}
+                  completedSessions={sessionSummary.completedCount}
+                  thisMonthSessions={sessionSummary.thisMonthCount}
+                  onSignOut={() => {
+                    void handleSignOut();
+                  }}
+                  isSigningOut={isSigningOut}
+                />
 
-            <WeightHistorySection
-              period={period}
-              onPeriodChange={setPeriod}
-              points={chartPoints}
-              geometry={chartGeometry}
-              currentWeightKg={summary.currentWeightKg}
-              deltaWeightKg={summary.deltaWeightKg}
-            />
+                <BodyCompositionCards summary={summary} />
 
-            <ProgressPhotosSection
-              photos={photos}
-              isUploadingPhoto={isUploadingPhoto}
-              uploadError={photoUploadError}
-              uploadSuccess={photoUploadSuccess}
-              onImportPhoto={handleOpenImportPicker}
-              onTakePhoto={handleOpenCameraPicker}
-            />
-          </>
-        ) : null}
-      </main>
+                <WeightHistorySection
+                  period={period}
+                  onPeriodChange={setPeriod}
+                  points={chartPoints}
+                  geometry={chartGeometry}
+                  currentWeightKg={summary.currentWeightKg}
+                  deltaWeightKg={summary.deltaWeightKg}
+                />
+
+                <ProgressPhotosSection
+                  photos={photos}
+                  currentWeightKg={summary.currentWeightKg}
+                  isUploadingPhoto={isUploadingPhoto}
+                  deletingPhotoId={deletingPhotoId}
+                  uploadError={photoUploadError}
+                  uploadSuccess={photoUploadSuccess}
+                  onImportPhoto={handleOpenImportPicker}
+                  onTakePhoto={handleOpenCameraPicker}
+                  onOpenGallery={() => setIsGalleryOpen(true)}
+                  onDeletePhoto={(photoId) => {
+                    void handleDeletePhoto(photoId);
+                  }}
+                />
+              </>
+            ) : null}
+          </main>
+        </>
+      )}
     </div>
   );
 }

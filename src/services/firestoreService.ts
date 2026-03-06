@@ -96,6 +96,8 @@ const bodyMetricsCollectionRef = (uid: string) =>
   collection(db, "users", uid, "bodyMetrics");
 const progressPhotosCollectionRef = (uid: string) =>
   collection(db, "users", uid, "progressPhotos");
+const progressPhotoDocRef = (uid: string, photoId: string) =>
+  doc(db, "users", uid, "progressPhotos", photoId);
 const exerciseStatsDocRef = (uid: string, exerciseId: string) =>
   doc(db, "users", uid, "exerciseStats", exerciseId);
 const exerciseTimelineCollectionRef = (uid: string, exerciseId: string) =>
@@ -901,6 +903,10 @@ export async function addProgressPhoto(
 
   const reference = await addDoc(progressPhotosCollectionRef(uid), payload);
   return reference.id;
+}
+
+export async function deleteProgressPhoto(uid: string, photoId: string): Promise<void> {
+  await deleteDoc(progressPhotoDocRef(uid, photoId));
 }
 
 export async function upsertExerciseStats(

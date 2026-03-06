@@ -31,9 +31,13 @@ export interface WeightHistorySectionProps {
 
 export interface ProgressPhotosSectionProps {
   photos: ProgressPhotoEntry[];
+  currentWeightKg: number | null;
   isUploadingPhoto: boolean;
+  deletingPhotoId: string | null;
   uploadError: string | null;
   uploadSuccess: string | null;
   onImportPhoto: () => void;
   onTakePhoto: () => void;
+  onOpenGallery: () => void;
+  onDeletePhoto: (photoId: string) => void;
 }
