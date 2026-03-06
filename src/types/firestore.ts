@@ -129,6 +129,9 @@ export interface BodyMetricDoc extends TimestampedDoc {
   note: string;
 }
 
+export type ProgressPhotoMediaType = "image" | "video";
+export type ProgressPhotoKind = "original" | "fade";
+
 export interface ProgressPhotoDoc extends TimestampedDoc {
   takenAt: Timestamp;
   storagePath: string;
@@ -136,6 +139,9 @@ export interface ProgressPhotoDoc extends TimestampedDoc {
   weightKgSnapshot: number | null;
   bodyFatPctSnapshot: number | null;
   note: string;
+  mediaType?: ProgressPhotoMediaType;
+  kind?: ProgressPhotoKind;
+  sourcePhotoIds?: string[] | null;
 }
 
 export interface ExerciseStatsDoc {

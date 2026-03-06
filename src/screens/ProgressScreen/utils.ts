@@ -1,6 +1,7 @@
 import type {
   BodyMetricEntry,
   PeriodOption,
+  ProgressPhotoEntry,
   SessionEntry,
   SessionSummary,
   WeightChartGeometry,
@@ -175,4 +176,29 @@ export function getFallbackPhoto(index: number): string {
     "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?q=80&w=1470&auto=format&fit=crop",
   ];
   return photos[index % photos.length] ?? photos[0];
+}
+
+export function inferMediaTypeFromUrl(url: string | null): "image" | "video" {
+  if (typeof url !== "string" || url.trim().length === 0) {
+    return "image";
+  }
+
+  const lower = url.toLowerCase();
+  if (lower.includes("/video/upload/")) {
+    return "video";
+  }
+
+  if (/\.(mp4|mov|webm|m4v)(\?|#|$)/.test(lower)) {
+    return "video";
+  }
+
+  return "image";
+}
+
+export function resolveProgressPhotoMediaType(photo: ProgressPhotoEntry): "image" | "video" {
+  if (photo.mediaType === "image" || photo.mediaType === "video") {
+    return photo.mediaType;
+  }
+
+  return inferMediaTypeFromUrl(photo.mediaUrl ?? photo.storagePath ?? photo.previewUrl);
 }

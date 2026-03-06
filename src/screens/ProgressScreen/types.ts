@@ -16,6 +16,7 @@ export type SessionEntry = SessionDoc & { id: string };
 export interface ProgressPhotoEntry extends ProgressPhotoDoc {
   id: string;
   previewUrl: string | null;
+  mediaUrl: string | null;
 }
 
 export interface WeightChartPoint {

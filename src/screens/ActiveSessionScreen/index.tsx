@@ -6,6 +6,7 @@ import {
   type ExerciseConfig,
 } from "../ExerciseConfigScreen/index.tsx";
 import {
+  addSessionExercise,
   createExercise,
   clearRestTimer,
   endExercise,
@@ -258,29 +259,32 @@ export function ActiveSessionScreen({
     setIsExercisePickerOpen(false);
   };
 
-  const handleAddExerciseToCurrentSession = (
+  const handleAddExerciseToCurrentSession = async (
     exerciseId: string,
     sourceExercises: ExercisePickerOption[] = availableExercises,
-  ) => {
+  ): Promise<void> => {
     const selectedExercise = sourceExercises.find((item) => item.id === exerciseId);
     if (!selectedExercise) {
       return;
     }
 
-    setExercises((previous) => {
-      if (previous.some((item) => item.exerciseId === exerciseId)) {
-        return previous;
-      }
+    if (exercises.some((item) => item.exerciseId === exerciseId)) {
+      return;
+    }
 
-      const nextOrder =
-        previous.reduce((maxOrder, item) => Math.max(maxOrder, item.order), 0) + 1;
+    const nextOrder =
+      exercises.reduce((maxOrder, item) => Math.max(maxOrder, item.order), 0) + 1;
+    const runtimeKey = createRuntimeExerciseKey(selectedExercise.id);
+    let createdSessionExerciseId: string | null = null;
 
-      return [
-        ...previous,
-        {
-          key: createRuntimeExerciseKey(selectedExercise.id),
+    if (sessionId) {
+      setIsBusy(true);
+      setErrorMessage(null);
+
+      try {
+        createdSessionExerciseId = await addSessionExercise(userId, sessionId, {
           exerciseId: selectedExercise.id,
-          exerciseName: selectedExercise.name,
+          exerciseNameSnapshot: selectedExercise.name,
           order: nextOrder,
           trackingMode: selectedExercise.trackingMode,
           targetSets: selectedExercise.defaultSets,
@@ -288,13 +292,37 @@ export function ActiveSessionScreen({
           targetWeightKg: selectedExercise.defaultWeightKg,
           targetDurationSec: selectedExercise.defaultDurationSec,
           restSec: selectedExercise.defaultRestSec,
-          status: "pending",
-          sessionExerciseId: null,
-          startedAtMs: null,
-          loggedSets: [],
-        },
-      ];
-    });
+        });
+      } catch {
+        setErrorMessage(
+          "Impossible d ajouter cet exercice a la seance demarree. Reessaie.",
+        );
+        setIsBusy(false);
+        return;
+      } finally {
+        setIsBusy(false);
+      }
+    }
+
+    setExercises((previous) => [
+      ...previous,
+      {
+        key: runtimeKey,
+        exerciseId: selectedExercise.id,
+        exerciseName: selectedExercise.name,
+        order: nextOrder,
+        trackingMode: selectedExercise.trackingMode,
+        targetSets: selectedExercise.defaultSets,
+        targetReps: selectedExercise.defaultReps,
+        targetWeightKg: selectedExercise.defaultWeightKg,
+        targetDurationSec: selectedExercise.defaultDurationSec,
+        restSec: selectedExercise.defaultRestSec,
+        status: "pending",
+        sessionExerciseId: createdSessionExerciseId,
+        startedAtMs: null,
+        loggedSets: [],
+      },
+    ]);
 
     setHasAutoFinalizeAttempted(false);
     setIsSessionCompleted(false);
@@ -343,7 +371,7 @@ export function ActiveSessionScreen({
 
       const refreshedExercises = await listExercises(userId);
       setAvailableExercises(refreshedExercises);
-      handleAddExerciseToCurrentSession(createdExerciseId, refreshedExercises);
+      await handleAddExerciseToCurrentSession(createdExerciseId, refreshedExercises);
 
       setIsExerciseConfigOpen(false);
       setReturnToPickerAfterExerciseConfig(false);
@@ -367,6 +395,23 @@ export function ActiveSessionScreen({
     }
 
     if (exercise.status === "in_progress") {
+      setActiveExerciseKey(exerciseKey);
+      setView("exercise_active");
+      return;
+    }
+
+    if (exercise.sessionExerciseId) {
+      setExercises((previous) =>
+        previous.map((item) =>
+          item.key === exerciseKey
+            ? {
+                ...item,
+                status: "in_progress",
+                startedAtMs: item.startedAtMs ?? Date.now(),
+              }
+            : item,
+        ),
+      );
       setActiveExerciseKey(exerciseKey);
       setView("exercise_active");
       return;
@@ -709,7 +754,9 @@ export function ActiveSessionScreen({
           isLoading={isLoadingExercises}
           onSearchChange={setExerciseSearchQuery}
           onClose={closeExercisePicker}
-          onAddExercise={handleAddExerciseToCurrentSession}
+          onAddExercise={(exerciseId) => {
+            void handleAddExerciseToCurrentSession(exerciseId);
+          }}
           onCreateExercise={handleCreateExerciseFromPicker}
         />
       ) : null}

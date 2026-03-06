@@ -9,7 +9,10 @@ import {
   listProgressPhotos,
   listSessions,
 } from "../../services/firestoreService.ts";
-import { uploadToCloudinary } from "../../services/imageUploadService.ts";
+import {
+  generateFadeVideoFromCloudinaryPhotos,
+  uploadToCloudinary,
+} from "../../services/imageUploadService.ts";
 import type {
   BodyMetricEntry,
   PeriodOption,
@@ -22,6 +25,7 @@ import {
   buildWeightChartPoints,
   computeSessionSummary,
   computeWeightSummary,
+  resolveProgressPhotoMediaType,
   toMillis,
 } from "./utils.ts";
 import { BodyCompositionCards } from "./components/BodyCompositionCards.tsx";
@@ -30,11 +34,7 @@ import { ProfileIdentityCard } from "./components/ProfileIdentityCard.tsx";
 import { ProgressPhotosSection } from "./components/ProgressPhotosSection.tsx";
 import { WeightHistorySection } from "./components/WeightHistorySection.tsx";
 
-async function resolveProgressPhotoUrl(photo: {
-  storagePath: string;
-  thumbnailPath: string | null;
-}): Promise<string | null> {
-  const path = photo.thumbnailPath ?? photo.storagePath;
+async function resolveStorageLikeUrl(path: string | null | undefined): Promise<string | null> {
   if (!path) {
     return null;
   }
@@ -48,6 +48,13 @@ async function resolveProgressPhotoUrl(photo: {
   } catch {
     return null;
   }
+}
+
+async function resolveProgressPhotoPreviewUrl(photo: {
+  storagePath: string;
+  thumbnailPath: string | null;
+}): Promise<string | null> {
+  return resolveStorageLikeUrl(photo.thumbnailPath ?? photo.storagePath);
 }
 
 function getDefaultProfilePhoto(displayName: string): string {
@@ -66,6 +73,7 @@ export function ProgressScreen({
   const [isLoading, setIsLoading] = useState(true);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isGeneratingFade, setIsGeneratingFade] = useState(false);
   const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
@@ -104,7 +112,8 @@ export function ProgressScreen({
         const hydratedPhotos = await Promise.all(
           sortedPhotos.map(async (photo) => ({
             ...photo,
-            previewUrl: await resolveProgressPhotoUrl(photo),
+            previewUrl: await resolveProgressPhotoPreviewUrl(photo),
+            mediaUrl: await resolveStorageLikeUrl(photo.storagePath),
           })),
         );
 
@@ -162,7 +171,7 @@ export function ProgressScreen({
   };
 
   const handleOpenImportPicker = () => {
-    if (isUploadingPhoto || deletingPhotoId !== null) {
+    if (isUploadingPhoto || isGeneratingFade || deletingPhotoId !== null) {
       return;
     }
 
@@ -172,7 +181,7 @@ export function ProgressScreen({
   };
 
   const handleOpenCameraPicker = () => {
-    if (isUploadingPhoto || deletingPhotoId !== null) {
+    if (isUploadingPhoto || isGeneratingFade || deletingPhotoId !== null) {
       return;
     }
 
@@ -229,9 +238,13 @@ export function ProgressScreen({
         weightKgSnapshot: currentWeightKg,
         bodyFatPctSnapshot: currentBodyFatPct,
         note: "",
+        mediaType: "image",
+        kind: "original",
+        sourcePhotoIds: null,
         createdAt: takenAt,
         updatedAt: takenAt,
         previewUrl: uploaded.thumbnailUrl ?? uploaded.imageUrl,
+        mediaUrl: uploaded.imageUrl,
       };
 
       setPhotos((current) =>
@@ -251,7 +264,7 @@ export function ProgressScreen({
   };
 
   const handleDeletePhoto = async (photoId: string) => {
-    if (isUploadingPhoto || deletingPhotoId !== null) {
+    if (isUploadingPhoto || isGeneratingFade || deletingPhotoId !== null) {
       return;
     }
 
@@ -273,6 +286,85 @@ export function ProgressScreen({
       setPhotoUploadSuccess(null);
     } finally {
       setDeletingPhotoId(null);
+    }
+  };
+
+  const handleGenerateFade = async (photoIds: string[]) => {
+    if (
+      isGeneratingFade ||
+      isUploadingPhoto ||
+      deletingPhotoId !== null ||
+      photoIds.length < 2
+    ) {
+      return;
+    }
+
+    const selectedPhotos = photos
+      .filter((photo) => photoIds.includes(photo.id))
+      .filter((photo) => resolveProgressPhotoMediaType(photo) === "image")
+      .sort((a, b) => toMillis(a.takenAt) - toMillis(b.takenAt));
+
+    if (selectedPhotos.length < 2) {
+      setPhotoUploadError("Selectionne au moins 2 photos (les videos ne sont pas prises en compte).");
+      setPhotoUploadSuccess(null);
+      return;
+    }
+
+    setIsGeneratingFade(true);
+    setPhotoUploadError(null);
+    setPhotoUploadSuccess(null);
+
+    try {
+      const fadeResult = await generateFadeVideoFromCloudinaryPhotos(
+        selectedPhotos.map((photo) => photo.mediaUrl ?? photo.storagePath),
+      );
+      const takenAt = Timestamp.now();
+      const currentWeightKg = latestBodyMetric?.weightKg ?? null;
+      const currentBodyFatPct =
+        typeof latestBodyMetric?.bodyFatPct === "number"
+          ? latestBodyMetric.bodyFatPct
+          : null;
+      const photoId = await addProgressPhoto(userId, {
+        takenAt,
+        storagePath: fadeResult.videoUrl,
+        thumbnailPath: fadeResult.thumbnailUrl,
+        weightKgSnapshot: currentWeightKg,
+        bodyFatPctSnapshot: currentBodyFatPct,
+        mediaType: "video",
+        kind: "fade",
+        sourcePhotoIds: selectedPhotos.map((photo) => photo.id),
+      });
+
+      const localEntry: ProgressPhotoEntry = {
+        id: photoId,
+        takenAt,
+        storagePath: fadeResult.videoUrl,
+        thumbnailPath: fadeResult.thumbnailUrl,
+        weightKgSnapshot: currentWeightKg,
+        bodyFatPctSnapshot: currentBodyFatPct,
+        note: "",
+        mediaType: "video",
+        kind: "fade",
+        sourcePhotoIds: selectedPhotos.map((photo) => photo.id),
+        createdAt: takenAt,
+        updatedAt: takenAt,
+        previewUrl: fadeResult.thumbnailUrl ?? fadeResult.videoUrl,
+        mediaUrl: fadeResult.videoUrl,
+      };
+
+      setPhotos((current) =>
+        [localEntry, ...current].sort((a, b) => toMillis(b.takenAt) - toMillis(a.takenAt)),
+      );
+      setPhotoUploadSuccess("Fondu genere et ajoute a la galerie.");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Impossible de generer le fondu pour le moment.";
+      setPhotoUploadError(message);
+      setPhotoUploadSuccess(null);
+    } finally {
+      setIsGeneratingFade(false);
     }
   };
 
@@ -299,10 +391,16 @@ export function ProgressScreen({
           photos={photos}
           currentWeightKg={summary.currentWeightKg}
           deletingPhotoId={deletingPhotoId}
+          isGeneratingFade={isGeneratingFade}
+          feedbackError={photoUploadError}
+          feedbackSuccess={photoUploadSuccess}
           onBack={() => setIsGalleryOpen(false)}
           onOpenImportPhoto={handleOpenImportPicker}
           onDeletePhoto={(photoId) => {
             void handleDeletePhoto(photoId);
+          }}
+          onGenerateFade={(photoIds) => {
+            void handleGenerateFade(photoIds);
           }}
         />
       ) : (

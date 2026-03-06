@@ -207,6 +207,34 @@ export interface AddProgressPhotoInput {
   weightKgSnapshot?: number | null;
   bodyFatPctSnapshot?: number | null;
   note?: string;
+  mediaType?: "image" | "video";
+  kind?: "original" | "fade";
+  sourcePhotoIds?: string[] | null;
+}
+
+export interface UpdateSessionExerciseInput {
+  id?: string;
+  exerciseId: string;
+  exerciseNameSnapshot: string;
+  status: SessionExerciseStatus;
+  order?: number;
+  trackingMode: TrackingMode;
+  targetSets: number;
+  targetReps?: number | null;
+  targetWeightKg?: number | null;
+  targetDurationSec?: number | null;
+  restSec: number;
+  completedSets: number;
+  totalReps: number;
+  totalVolumeKg: number;
+  totalDurationSec: number;
+}
+
+export interface UpdatePastSessionInput {
+  gymName: string;
+  status: Exclude<SessionStatus, "active">;
+  notes?: string;
+  exercises: UpdateSessionExerciseInput[];
 }
 
 export interface UpsertExerciseStatsInput {
@@ -364,6 +392,25 @@ export async function listSessionExercises(
   return snapshot.docs.map((document) => ({
     id: document.id,
     ...(document.data() as SessionExerciseDoc),
+  }));
+}
+
+export async function listSessionExerciseSets(
+  uid: string,
+  sessionId: string,
+  sessionExerciseId: string,
+  maxItems = 200,
+): Promise<Array<SetEntryDoc & { id: string }>> {
+  const setsQuery = query(
+    setsCollectionRef(uid, sessionId, sessionExerciseId),
+    orderBy("setNumber", "asc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(setsQuery);
+
+  return snapshot.docs.map((document) => ({
+    id: document.id,
+    ...(document.data() as SetEntryDoc),
   }));
 }
 
@@ -557,6 +604,165 @@ export async function deleteSession(uid: string, sessionId: string): Promise<voi
   await deleteDoc(sessionReference);
 }
 
+export async function updatePastSession(
+  uid: string,
+  sessionId: string,
+  input: UpdatePastSessionInput,
+): Promise<void> {
+  if (!Array.isArray(input.exercises) || input.exercises.length === 0) {
+    throw new Error("Une seance doit contenir au moins un exercice.");
+  }
+
+  const sessionReference = sessionDocRef(uid, sessionId);
+  const sessionSnapshot = await getDoc(sessionReference);
+  if (!sessionSnapshot.exists()) {
+    throw new Error(`Session "${sessionId}" introuvable.`);
+  }
+
+  const currentSession = sessionSnapshot.data() as SessionDoc;
+  const existingExercisesSnapshot = await getDocs(sessionExercisesCollectionRef(uid, sessionId));
+  const existingExercises = new Map(
+    existingExercisesSnapshot.docs.map((documentSnapshot) => [
+      documentSnapshot.id,
+      documentSnapshot.data() as SessionExerciseDoc,
+    ]),
+  );
+
+  const batch = writeBatch(db);
+  const inputExerciseIds = new Set(
+    input.exercises
+      .map((exercise) => exercise.id?.trim() ?? "")
+      .filter((exerciseId) => exerciseId.length > 0),
+  );
+
+  for (const existingExerciseDoc of existingExercisesSnapshot.docs) {
+    if (inputExerciseIds.has(existingExerciseDoc.id)) {
+      continue;
+    }
+
+    const setsSnapshot = await getDocs(setsCollectionRef(uid, sessionId, existingExerciseDoc.id));
+    for (const setDocumentSnapshot of setsSnapshot.docs) {
+      batch.delete(setDocumentSnapshot.ref);
+    }
+
+    batch.delete(existingExerciseDoc.ref);
+  }
+
+  input.exercises.forEach((exercise, index) => {
+    const existingExerciseId = exercise.id?.trim() ?? "";
+    const existingExercise = existingExercises.get(existingExerciseId);
+    const exerciseReference =
+      existingExerciseId.length > 0
+        ? sessionExerciseDocRef(uid, sessionId, existingExerciseId)
+        : doc(sessionExercisesCollectionRef(uid, sessionId));
+    const normalizedStatus =
+      exercise.status === "active" ? "completed" : exercise.status;
+    const targetSets = Math.max(1, Math.round(exercise.targetSets));
+    const completedSets = Math.max(0, Math.min(targetSets, Math.round(exercise.completedSets)));
+    const reps = Math.max(0, Math.round(exercise.totalReps));
+    const duration = Math.max(0, Math.round(exercise.totalDurationSec));
+    const weight = exercise.targetWeightKg ?? null;
+    const volume = Math.max(
+      0,
+      Number.isFinite(exercise.totalVolumeKg)
+        ? Math.round(exercise.totalVolumeKg)
+        : Math.round((weight ?? 0) * reps),
+    );
+    const endedAt = currentSession.endedAt ?? Timestamp.now();
+    const completedAt = normalizedStatus === "completed" ? endedAt ?? Timestamp.now() : null;
+    const normalizedExerciseId =
+      exercise.exerciseId.trim().length > 0
+        ? exercise.exerciseId.trim()
+        : `manual-${sessionId}-${index + 1}`;
+    const normalizedExerciseName =
+      exercise.exerciseNameSnapshot.trim().length > 0
+        ? exercise.exerciseNameSnapshot.trim()
+        : `Exercice ${index + 1}`;
+    const normalizedOrder = exercise.order ?? index + 1;
+    const normalizedRestSec = Math.max(0, Math.round(exercise.restSec));
+    const normalizedTargetReps =
+      typeof exercise.targetReps === "number" ? Math.max(0, Math.round(exercise.targetReps)) : null;
+    const normalizedTargetDurationSec =
+      typeof exercise.targetDurationSec === "number"
+        ? Math.max(0, Math.round(exercise.targetDurationSec))
+        : null;
+
+    if (existingExercise) {
+      const exercisePatch: PartialWithFieldValue<SessionExerciseDoc> = {
+        exerciseId: normalizedExerciseId,
+        exerciseNameSnapshot: normalizedExerciseName,
+        status: normalizedStatus,
+        completedAt,
+        order: normalizedOrder,
+        trackingMode: exercise.trackingMode,
+        targetSets,
+        targetReps: normalizedTargetReps,
+        targetWeightKg: weight,
+        targetDurationSec: normalizedTargetDurationSec,
+        restSec: normalizedRestSec,
+        startedAt: existingExercise.startedAt ?? currentSession.startedAt,
+        endedAt,
+        completedSets,
+        totalReps: reps,
+        totalVolumeKg: volume,
+        totalDurationSec: duration,
+        updatedAt: serverTimestamp(),
+      };
+
+      batch.set(exerciseReference, exercisePatch, { merge: true });
+      return;
+    }
+
+    const newExercisePayload: WithFieldValue<SessionExerciseDoc> = {
+      exerciseId: normalizedExerciseId,
+      exerciseNameSnapshot: normalizedExerciseName,
+      status: normalizedStatus,
+      completedAt,
+      order: normalizedOrder,
+      trackingMode: exercise.trackingMode,
+      targetSets,
+      targetReps: normalizedTargetReps,
+      targetWeightKg: weight,
+      targetDurationSec: normalizedTargetDurationSec,
+      restSec: normalizedRestSec,
+      startedAt: currentSession.startedAt,
+      endedAt,
+      completedSets,
+      totalReps: reps,
+      totalVolumeKg: volume,
+      totalDurationSec: duration,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    batch.set(exerciseReference, newExercisePayload);
+  });
+
+  const endedAt = currentSession.endedAt ?? Timestamp.now();
+  const durationFromDates =
+    currentSession.startedAt instanceof Timestamp
+      ? Math.max(
+          0,
+          Math.round((endedAt.toMillis() - currentSession.startedAt.toMillis()) / 1000),
+        )
+      : null;
+  const durationSec =
+    currentSession.durationSec !== null && Number.isFinite(currentSession.durationSec)
+      ? Math.max(0, Math.round(currentSession.durationSec))
+      : durationFromDates;
+  const sessionPatch: PartialWithFieldValue<SessionDoc> = {
+    gymName: input.gymName.trim().length > 0 ? input.gymName.trim() : currentSession.gymName,
+    status: input.status,
+    endedAt,
+    durationSec,
+    notes: input.notes ?? currentSession.notes ?? "",
+    updatedAt: serverTimestamp(),
+  };
+
+  batch.set(sessionReference, sessionPatch, { merge: true });
+  await batch.commit();
+}
+
 export async function addPlanItem(
   uid: string,
   planId: string,
@@ -728,6 +934,37 @@ export async function startExercise(
   return sessionExerciseReference.id;
 }
 
+export async function addSessionExercise(
+  uid: string,
+  sessionId: string,
+  input: StartExerciseInput,
+): Promise<string> {
+  const payload: WithFieldValue<SessionExerciseDoc> = {
+    exerciseId: input.exerciseId,
+    exerciseNameSnapshot: input.exerciseNameSnapshot,
+    status: "active",
+    completedAt: null,
+    order: input.order,
+    trackingMode: input.trackingMode,
+    targetSets: input.targetSets,
+    targetReps: input.targetReps ?? null,
+    targetWeightKg: input.targetWeightKg ?? null,
+    targetDurationSec: input.targetDurationSec ?? null,
+    restSec: input.restSec,
+    startedAt: serverTimestamp(),
+    endedAt: null,
+    completedSets: 0,
+    totalReps: 0,
+    totalVolumeKg: 0,
+    totalDurationSec: 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  const reference = await addDoc(sessionExercisesCollectionRef(uid, sessionId), payload);
+  return reference.id;
+}
+
 export async function endExercise(
   uid: string,
   sessionId: string,
@@ -897,6 +1134,12 @@ export async function addProgressPhoto(
     weightKgSnapshot: input.weightKgSnapshot ?? null,
     bodyFatPctSnapshot: input.bodyFatPctSnapshot ?? null,
     note: input.note ?? "",
+    mediaType: input.mediaType ?? "image",
+    kind: input.kind ?? "original",
+    sourcePhotoIds:
+      Array.isArray(input.sourcePhotoIds) && input.sourcePhotoIds.length > 0
+        ? input.sourcePhotoIds
+        : null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
