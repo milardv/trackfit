@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExercisePickerScreen } from "../ExercisePickerScreen/index.tsx";
 import type { ExercisePickerOption } from "../ExercisePickerScreen/types.ts";
 import {
@@ -16,9 +16,11 @@ import {
   startExercise,
   startRestAfterSet,
   startSession,
+  updateSessionExerciseConfig,
 } from "../../services/firestoreService.ts";
 import type {
   ActiveSessionScreenProps,
+  ExerciseEditDraft,
   ExerciseStatus,
   RuntimeExercise,
   SessionView,
@@ -26,6 +28,7 @@ import type {
 import { toClockParts } from "./utils.ts";
 import { ActiveSessionHeader } from "./components/ActiveSessionHeader.tsx";
 import { ExerciseActiveView } from "./components/ExerciseActiveView.tsx";
+import { ExerciseEditModal } from "./components/ExerciseEditModal.tsx";
 import { ExerciseListView } from "./components/ExerciseListView.tsx";
 import { SessionDoneView } from "./components/SessionDoneView.tsx";
 
@@ -34,6 +37,67 @@ function createRuntimeExerciseKey(exerciseId: string): string {
     return `${exerciseId}-${crypto.randomUUID()}`;
   }
   return `${exerciseId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+interface DurationCountdownState {
+  exerciseKey: string;
+  setNumber: number;
+  endsAtMs: number;
+}
+
+function getDurationTargetSec(exercise: RuntimeExercise | null): number | null {
+  if (!exercise || exercise.trackingMode !== "duration_only") {
+    return null;
+  }
+
+  if (typeof exercise.targetDurationSec !== "number" || !Number.isFinite(exercise.targetDurationSec)) {
+    return null;
+  }
+
+  const normalizedDuration = Math.max(0, Math.round(exercise.targetDurationSec));
+  return normalizedDuration > 0 ? normalizedDuration : null;
+}
+
+function playDurationCountdownDoneSound(): void {
+  if (typeof window === "undefined" || typeof window.AudioContext === "undefined") {
+    return;
+  }
+
+  try {
+    const context = new window.AudioContext();
+    const now = context.currentTime;
+    const master = context.createGain();
+    master.connect(context.destination);
+    master.gain.setValueAtTime(0.0001, now);
+    master.gain.exponentialRampToValueAtTime(0.055, now + 0.03);
+    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+    const lowTone = context.createOscillator();
+    lowTone.type = "sine";
+    lowTone.frequency.setValueAtTime(720, now);
+    lowTone.frequency.exponentialRampToValueAtTime(620, now + 0.4);
+    lowTone.connect(master);
+
+    const highTone = context.createOscillator();
+    const highToneGain = context.createGain();
+    highTone.type = "triangle";
+    highTone.frequency.setValueAtTime(1080, now);
+    highTone.frequency.exponentialRampToValueAtTime(900, now + 0.32);
+    highToneGain.gain.setValueAtTime(0.4, now);
+    highTone.connect(highToneGain);
+    highToneGain.connect(master);
+
+    lowTone.start(now);
+    highTone.start(now + 0.01);
+    lowTone.stop(now + 0.45);
+    highTone.stop(now + 0.33);
+
+    window.setTimeout(() => {
+      void context.close();
+    }, 700);
+  } catch {
+    // Ignore browsers/devices where the sound cannot be played.
+  }
 }
 
 export function ActiveSessionScreen({
@@ -61,6 +125,16 @@ export function ActiveSessionScreen({
     useState(false);
   const [isCreatingExercise, setIsCreatingExercise] = useState(false);
   const [exerciseCreateError, setExerciseCreateError] = useState<string | null>(null);
+  const [editingExerciseKey, setEditingExerciseKey] = useState<string | null>(null);
+  const [exerciseEditDraft, setExerciseEditDraft] = useState<ExerciseEditDraft | null>(
+    null,
+  );
+  const [exerciseEditError, setExerciseEditError] = useState<string | null>(null);
+  const [isSavingExerciseEdit, setIsSavingExerciseEdit] = useState(false);
+  const [durationCountdown, setDurationCountdown] = useState<DurationCountdownState | null>(
+    null,
+  );
+  const durationCountdownSoundSetKeyRef = useRef<string | null>(null);
 
   const [exercises, setExercises] = useState<RuntimeExercise[]>(() =>
     plan.exercises
@@ -159,6 +233,72 @@ export function ActiveSessionScreen({
     : 1;
   const isActiveExerciseReadyToComplete =
     activeExercise !== null && activeExercise.loggedSets.length >= activeExercise.targetSets;
+  const activeDurationTargetSec = getDurationTargetSec(activeExercise);
+
+  useEffect(() => {
+    if (
+      !activeExercise ||
+      activeExercise.status !== "in_progress" ||
+      activeDurationTargetSec === null ||
+      isActiveExerciseReadyToComplete ||
+      restRemainingSec > 0
+    ) {
+      setDurationCountdown(null);
+      return;
+    }
+
+    setDurationCountdown((current) => {
+      if (
+        current &&
+        current.exerciseKey === activeExercise.key &&
+        current.setNumber === currentSetNumber
+      ) {
+        return current;
+      }
+
+      return {
+        exerciseKey: activeExercise.key,
+        setNumber: currentSetNumber,
+        endsAtMs: Date.now() + activeDurationTargetSec * 1000,
+      };
+    });
+  }, [
+    activeDurationTargetSec,
+    activeExercise,
+    currentSetNumber,
+    isActiveExerciseReadyToComplete,
+    restRemainingSec,
+  ]);
+
+  const durationCountdownRemainingSec =
+    durationCountdown &&
+    activeExercise &&
+    durationCountdown.exerciseKey === activeExercise.key &&
+    durationCountdown.setNumber === currentSetNumber
+      ? Math.max(0, Math.ceil((durationCountdown.endsAtMs - nowMs) / 1000))
+      : null;
+
+  const activeDurationSetKey =
+    activeExercise &&
+    activeDurationTargetSec !== null &&
+    durationCountdown &&
+    durationCountdown.exerciseKey === activeExercise.key &&
+    durationCountdown.setNumber === currentSetNumber
+      ? `${activeExercise.key}-${currentSetNumber}`
+      : null;
+
+  useEffect(() => {
+    if (!activeDurationSetKey || durationCountdownRemainingSec !== 0) {
+      return;
+    }
+
+    if (durationCountdownSoundSetKeyRef.current === activeDurationSetKey) {
+      return;
+    }
+
+    durationCountdownSoundSetKeyRef.current = activeDurationSetKey;
+    playDurationCountdownDoneSound();
+  }, [activeDurationSetKey, durationCountdownRemainingSec]);
 
   const allExercisesCompleted = totalCount > 0 && completedCount === totalCount;
   const selectedExerciseIds = useMemo(
@@ -257,6 +397,157 @@ export function ActiveSessionScreen({
   const closeExercisePicker = () => {
     setExerciseSearchQuery("");
     setIsExercisePickerOpen(false);
+  };
+
+  const openExerciseEditor = (exerciseKey: string) => {
+    if (isBusy || isFinalizingSession || isSessionCompleted || isSavingExerciseEdit) {
+      return;
+    }
+
+    const exercise = exercises.find((item) => item.key === exerciseKey);
+    if (!exercise) {
+      return;
+    }
+
+    setExerciseEditError(null);
+    setEditingExerciseKey(exercise.key);
+    setExerciseEditDraft({
+      exerciseName: exercise.exerciseName,
+      trackingMode: exercise.trackingMode,
+      targetSets: exercise.targetSets,
+      targetReps: exercise.targetReps,
+      targetWeightKg: exercise.targetWeightKg,
+      targetDurationSec: exercise.targetDurationSec,
+      restSec: exercise.restSec,
+      loggedSetsCount: exercise.loggedSets.length,
+    });
+  };
+
+  const closeExerciseEditor = () => {
+    if (isSavingExerciseEdit) {
+      return;
+    }
+
+    setExerciseEditError(null);
+    setEditingExerciseKey(null);
+    setExerciseEditDraft(null);
+  };
+
+  const updateExerciseEditDraft = (patch: Partial<ExerciseEditDraft>) => {
+    setExerciseEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            ...patch,
+          }
+        : current,
+    );
+  };
+
+  const handleSaveExerciseEdit = async () => {
+    if (
+      !editingExerciseKey ||
+      !exerciseEditDraft ||
+      isSavingExerciseEdit ||
+      isBusy
+    ) {
+      return;
+    }
+
+    const exercise = exercises.find((item) => item.key === editingExerciseKey);
+    if (!exercise) {
+      return;
+    }
+
+    const normalizedName = exerciseEditDraft.exerciseName.trim();
+    const normalizedSets = Math.max(1, Math.round(exerciseEditDraft.targetSets));
+    const normalizedRestSec = Math.max(0, Math.round(exerciseEditDraft.restSec));
+    const normalizedReps =
+      exerciseEditDraft.trackingMode === "duration_only"
+        ? null
+        : exerciseEditDraft.targetReps !== null
+          ? Math.max(0, Math.round(exerciseEditDraft.targetReps))
+          : null;
+    const normalizedWeight =
+      exerciseEditDraft.trackingMode === "weight_reps"
+        ? exerciseEditDraft.targetWeightKg !== null
+          ? Math.max(0, exerciseEditDraft.targetWeightKg)
+          : null
+        : null;
+    const normalizedDuration =
+      exerciseEditDraft.trackingMode === "duration_only"
+        ? exerciseEditDraft.targetDurationSec !== null
+          ? Math.max(0, Math.round(exerciseEditDraft.targetDurationSec))
+          : null
+        : null;
+
+    if (!normalizedName) {
+      setExerciseEditError("Le nom de l exercice est obligatoire.");
+      return;
+    }
+
+    if (normalizedSets < exercise.loggedSets.length) {
+      setExerciseEditError(
+        `Tu as deja ${exercise.loggedSets.length} sets loggues. Choisis au moins ${exercise.loggedSets.length} series.`,
+      );
+      return;
+    }
+
+    if (exerciseEditDraft.trackingMode !== "duration_only" && normalizedReps === null) {
+      setExerciseEditError("Renseigne un objectif de repetitions.");
+      return;
+    }
+
+    if (exerciseEditDraft.trackingMode === "duration_only" && normalizedDuration === null) {
+      setExerciseEditError("Renseigne une duree cible.");
+      return;
+    }
+
+    setIsSavingExerciseEdit(true);
+    setExerciseEditError(null);
+
+    try {
+      if (sessionId && exercise.sessionExerciseId) {
+        await updateSessionExerciseConfig(
+          userId,
+          sessionId,
+          exercise.sessionExerciseId,
+          {
+            exerciseNameSnapshot: normalizedName,
+            targetSets: normalizedSets,
+            targetReps: normalizedReps,
+            targetWeightKg: normalizedWeight,
+            targetDurationSec: normalizedDuration,
+            restSec: normalizedRestSec,
+          },
+        );
+      }
+
+      setExercises((previous) =>
+        previous.map((item) =>
+          item.key === editingExerciseKey
+            ? {
+                ...item,
+                exerciseName: normalizedName,
+                targetSets: normalizedSets,
+                targetReps: normalizedReps,
+                targetWeightKg: normalizedWeight,
+                targetDurationSec: normalizedDuration,
+                restSec: normalizedRestSec,
+              }
+            : item,
+        ),
+      );
+
+      setExerciseEditDraft(null);
+      setEditingExerciseKey(null);
+    } catch {
+      setExerciseEditError(
+        "Impossible d enregistrer les modifications de l exercice. Reessaie.",
+      );
+    } finally {
+      setIsSavingExerciseEdit(false);
+    }
   };
 
   const handleAddExerciseToCurrentSession = async (
@@ -472,6 +763,14 @@ export function ActiveSessionScreen({
       return;
     }
 
+    if (
+      activeExercise.trackingMode === "duration_only" &&
+      durationCountdownRemainingSec !== null &&
+      durationCountdownRemainingSec > 0
+    ) {
+      return;
+    }
+
     const nextSetNumber = activeExercise.loggedSets.length + 1;
     if (nextSetNumber > activeExercise.targetSets) {
       return;
@@ -521,6 +820,7 @@ export function ActiveSessionScreen({
       );
 
       const hasMoreSets = nextSetNumber < activeExercise.targetSets;
+      const activeDurationSec = getDurationTargetSec(activeExercise);
       if (hasMoreSets && activeExercise.restSec > 0) {
         const restEndAt = await startRestAfterSet(
           userId,
@@ -530,8 +830,18 @@ export function ActiveSessionScreen({
           activeExercise.restSec,
         );
         setRestEndsAtMs(restEndAt.toMillis());
+        setDurationCountdown(null);
       } else {
         setRestEndsAtMs(null);
+        if (hasMoreSets && activeDurationSec !== null) {
+          setDurationCountdown({
+            exerciseKey: activeExercise.key,
+            setNumber: nextSetNumber + 1,
+            endsAtMs: Date.now() + activeDurationSec * 1000,
+          });
+        } else {
+          setDurationCountdown(null);
+        }
       }
 
       if (!hasMoreSets) {
@@ -551,6 +861,7 @@ export function ActiveSessionScreen({
         setActiveExerciseKey(null);
         setView("exercise_list");
         setRestEndsAtMs(null);
+        setDurationCountdown(null);
       }
     } catch {
       setErrorMessage(
@@ -594,6 +905,7 @@ export function ActiveSessionScreen({
       setActiveExerciseKey(null);
       setView("exercise_list");
       setRestEndsAtMs(null);
+      setDurationCountdown(null);
     } catch {
       setErrorMessage("Impossible d enregistrer la fin de cet exercice. Reessaie.");
     } finally {
@@ -654,6 +966,11 @@ export function ActiveSessionScreen({
   };
 
   const handleBackAction = () => {
+    if (editingExerciseKey !== null) {
+      closeExerciseEditor();
+      return;
+    }
+
     if (isExerciseConfigOpen) {
       handleBackFromExerciseConfig();
       return;
@@ -678,6 +995,11 @@ export function ActiveSessionScreen({
   };
 
   const handleCloseAction = () => {
+    if (editingExerciseKey !== null) {
+      closeExerciseEditor();
+      return;
+    }
+
     if (view === "session_done" || !sessionId) {
       onClose();
       return;
@@ -711,6 +1033,7 @@ export function ActiveSessionScreen({
           onStartExercise={(exerciseKey) => {
             void handleStartExercise(exerciseKey);
           }}
+          onEditExercise={openExerciseEditor}
           onFinalizeSession={() => {
             void finalizeSession();
           }}
@@ -724,12 +1047,16 @@ export function ActiveSessionScreen({
         <ExerciseActiveView
           activeExercise={activeExercise}
           elapsedClock={elapsedClock}
+          durationCountdownRemainingSec={durationCountdownRemainingSec}
           activeSetTarget={activeSetTarget}
           currentSetNumber={currentSetNumber}
           progressPercent={progressPercent}
           isActiveExerciseReadyToComplete={isActiveExerciseReadyToComplete}
           isBusy={isBusy}
           restRemainingSec={restRemainingSec}
+          onEditExercise={() => {
+            openExerciseEditor(activeExercise.key);
+          }}
           onCompleteExercise={() => {
             void handleCompleteCurrentExercise();
           }}
@@ -768,6 +1095,19 @@ export function ActiveSessionScreen({
           isSubmitting={isCreatingExercise}
           errorMessage={exerciseCreateError}
           zIndexClass="z-[110]"
+        />
+      ) : null}
+
+      {editingExerciseKey !== null && exerciseEditDraft !== null ? (
+        <ExerciseEditModal
+          draft={exerciseEditDraft}
+          isSaving={isSavingExerciseEdit}
+          errorMessage={exerciseEditError}
+          onChange={updateExerciseEditDraft}
+          onClose={closeExerciseEditor}
+          onSave={() => {
+            void handleSaveExerciseEdit();
+          }}
         />
       ) : null}
 

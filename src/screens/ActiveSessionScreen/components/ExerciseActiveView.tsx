@@ -4,18 +4,43 @@ import type { ExerciseActiveViewProps } from "./types.ts";
 export function ExerciseActiveView({
   activeExercise,
   elapsedClock,
+  durationCountdownRemainingSec,
   activeSetTarget,
   currentSetNumber,
   progressPercent,
   isActiveExerciseReadyToComplete,
   isBusy,
   restRemainingSec,
+  onEditExercise,
   onCompleteExercise,
   onLogSet,
   onSkipRest,
 }: ExerciseActiveViewProps) {
+  const isDurationExercise = activeExercise.trackingMode === "duration_only";
+  const isDurationCountdownRunning =
+    isDurationExercise &&
+    durationCountdownRemainingSec !== null &&
+    durationCountdownRemainingSec > 0;
+  const isLogSetDisabled = isBusy || restRemainingSec > 0 || isDurationCountdownRunning;
+
   return (
     <main className="hide-scrollbar flex flex-1 flex-col overflow-y-auto pb-28">
+      {isDurationExercise && durationCountdownRemainingSec !== null ? (
+        <section className="px-4 pt-6">
+          <div className="rounded-3xl border border-primary/40 bg-primary/10 px-4 py-5 text-center shadow-lg shadow-primary/10">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/80">
+              Temps restant
+            </p>
+            <p className="mt-2 text-8xl font-black leading-none tracking-tight text-primary">
+              {durationCountdownRemainingSec}
+            </p>
+            <p className="mt-3 text-sm font-medium text-slate-200">
+              {durationCountdownRemainingSec > 0 ? "Tiens la position" : "Top, valide le set"}
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       <section className="flex flex-col items-center justify-center gap-6 py-8">
         <div className="flex w-full justify-center gap-3 px-4">
           <div className="flex flex-col items-center gap-2">
@@ -64,6 +89,15 @@ export function ExerciseActiveView({
             <p className="text-lg font-medium text-slate-400">
               {getExerciseTargetLabel(activeExercise)}
             </p>
+            <button
+              type="button"
+              onClick={onEditExercise}
+              disabled={isBusy}
+              className="mt-2 inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined text-sm">edit</span>
+              Modifier cet exercice
+            </button>
           </div>
           <div className="w-full">
             <div className="mb-2 flex items-end justify-between">
@@ -196,14 +230,14 @@ export function ExerciseActiveView({
             <button
               type="button"
               onClick={onLogSet}
-              disabled={isBusy || restRemainingSec > 0}
+              disabled={isLogSetDisabled}
               className="group relative flex w-full items-center justify-center gap-3 rounded-2xl bg-primary px-6 py-5 text-background-dark shadow-lg shadow-primary/20 transition-all active:scale-[0.98] hover:bg-[#0fdc53] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className="material-symbols-outlined text-2xl transition-transform group-hover:scale-110">
                 timer
               </span>
               <span className="text-xl font-extrabold uppercase tracking-wide">
-                Log Set & Rest
+                {isDurationExercise ? "Valider le set" : "Log Set & Rest"}
               </span>
             </button>
 
@@ -223,7 +257,9 @@ export function ExerciseActiveView({
               </div>
             ) : (
               <p className="mt-3 text-center text-xs text-slate-400">
-                Lance le set quand tu es pret.
+                {isDurationCountdownRunning
+                  ? `Tiens encore ${durationCountdownRemainingSec} sec.`
+                  : "Lance le set quand tu es pret."}
               </p>
             )}
           </>

@@ -230,6 +230,15 @@ export interface UpdateSessionExerciseInput {
   totalDurationSec: number;
 }
 
+export interface UpdateSessionExerciseConfigInput {
+  exerciseNameSnapshot: string;
+  targetSets: number;
+  targetReps?: number | null;
+  targetWeightKg?: number | null;
+  targetDurationSec?: number | null;
+  restSec: number;
+}
+
 export interface UpdatePastSessionInput {
   gymName: string;
   status: Exclude<SessionStatus, "active">;
@@ -963,6 +972,27 @@ export async function addSessionExercise(
 
   const reference = await addDoc(sessionExercisesCollectionRef(uid, sessionId), payload);
   return reference.id;
+}
+
+export async function updateSessionExerciseConfig(
+  uid: string,
+  sessionId: string,
+  sessionExerciseId: string,
+  input: UpdateSessionExerciseConfigInput,
+): Promise<void> {
+  const patch: PartialWithFieldValue<SessionExerciseDoc> = {
+    exerciseNameSnapshot: input.exerciseNameSnapshot,
+    targetSets: Math.max(1, input.targetSets),
+    targetReps: input.targetReps ?? null,
+    targetWeightKg: input.targetWeightKg ?? null,
+    targetDurationSec: input.targetDurationSec ?? null,
+    restSec: Math.max(0, input.restSec),
+    updatedAt: serverTimestamp(),
+  };
+
+  await setDoc(sessionExerciseDocRef(uid, sessionId, sessionExerciseId), patch, {
+    merge: true,
+  });
 }
 
 export async function endExercise(

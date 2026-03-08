@@ -8,6 +8,11 @@ export interface GeneratedFadeResult {
   thumbnailUrl: string | null;
 }
 
+interface CloudinaryMediaSource {
+  publicId: string;
+  format: string;
+}
+
 interface CloudinaryUploadResponse {
   secure_url?: string;
   public_id?: string;
@@ -86,11 +91,15 @@ function encodePublicIdForPath(publicId: string): string {
     .join("/");
 }
 
-function encodePublicIdForLayer(publicId: string): string {
-  return encodeURIComponent(publicId).replace(/%2F/g, ":");
+function toLayerPublicId(publicId: string): string {
+  return publicId
+    .split("/")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .join(":");
 }
 
-function extractCloudinaryPublicId(url: string, cloudName: string): string | null {
+function extractCloudinaryMediaSource(url: string, cloudName: string): CloudinaryMediaSource | null {
   if (typeof url !== "string" || url.trim().length === 0) {
     return null;
   }
@@ -127,18 +136,28 @@ function extractCloudinaryPublicId(url: string, cloudName: string): string | nul
     return null;
   }
 
-  const joined = publicIdParts.join("/");
-  const withoutExtension = joined.replace(/\.[^/.]+$/, "");
-  return decodeURIComponent(withoutExtension);
+  const joined = decodeURIComponent(publicIdParts.join("/"));
+  const extensionMatch = joined.match(/\.([a-z0-9]+)$/i);
+  const format = extensionMatch?.[1]?.toLowerCase() ?? "jpg";
+  const publicId = joined.replace(/\.[^/.]+$/, "");
+
+  if (publicId.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    publicId,
+    format,
+  };
 }
 
-function buildFadeSourceUrl(cloudName: string, publicIds: string[]): string {
+function buildFadeSourceUrl(cloudName: string, sources: CloudinaryMediaSource[]): string {
   const clipDurationSec = 3;
   const transitionDurationSec = 1;
-  const basePublicId = publicIds[0];
-  const spliceTransforms = publicIds.slice(1).map((publicId) => {
-    const layerId = encodePublicIdForLayer(publicId);
-    return `l_image:${layerId},du_${clipDurationSec},c_fill,g_auto,w_1080,h_1440/fl_splice:transition_(name_fade;du_${transitionDurationSec}),fl_layer_apply`;
+  const baseSource = sources[0];
+  const spliceTransforms = sources.slice(1).map((source) => {
+    const layerId = toLayerPublicId(source.publicId);
+    return `l_${layerId},du_${clipDurationSec},c_fill,g_auto,w_1080,h_1440/fl_splice:transition_(name_fade;du_${transitionDurationSec}),fl_layer_apply`;
   });
 
   const transforms = [
@@ -147,7 +166,7 @@ function buildFadeSourceUrl(cloudName: string, publicIds: string[]): string {
     "f_mp4,q_auto:good",
   ];
 
-  return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/video/upload/${transforms.join("/")}/${encodePublicIdForPath(basePublicId)}`;
+  return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/video/upload/${transforms.join("/")}/${encodePublicIdForPath(baseSource.publicId)}.${encodeURIComponent(baseSource.format)}`;
 }
 
 function buildVideoThumbnailUrl(cloudName: string, publicId: string): string {
@@ -158,16 +177,20 @@ export async function generateFadeVideoFromCloudinaryPhotos(
   imageUrls: string[],
 ): Promise<GeneratedFadeResult> {
   const config = readCloudinaryConfig();
-  const orderedPublicIds = imageUrls
-    .map((url) => extractCloudinaryPublicId(url, config.cloudName))
-    .filter((publicId): publicId is string => Boolean(publicId));
-  const uniquePublicIds = [...new Set(orderedPublicIds)].slice(0, 12);
+  const orderedSources = imageUrls
+    .map((url) => extractCloudinaryMediaSource(url, config.cloudName))
+    .filter((source): source is CloudinaryMediaSource => Boolean(source));
+  const uniqueSources = orderedSources
+    .filter((source, index, array) =>
+      array.findIndex((candidate) => candidate.publicId === source.publicId) === index,
+    )
+    .slice(0, 12);
 
-  if (uniquePublicIds.length < 2) {
+  if (uniqueSources.length < 2) {
     throw new Error("Selectionne au moins 2 photos Cloudinary pour generer un fondu.");
   }
 
-  const sourceUrl = buildFadeSourceUrl(config.cloudName, uniquePublicIds);
+  const sourceUrl = buildFadeSourceUrl(config.cloudName, uniqueSources);
   const uploadUrl = `https://api.cloudinary.com/v1_1/${encodeURIComponent(config.cloudName)}/video/upload`;
   const formData = new FormData();
   formData.append("file", sourceUrl);
@@ -184,7 +207,10 @@ export async function generateFadeVideoFromCloudinaryPhotos(
   const json = (await response.json()) as CloudinaryUploadResponse;
   if (!response.ok || !json.secure_url) {
     const apiMessage = json.error?.message;
-    throw new Error(apiMessage ?? "Generation Cloudinary impossible.");
+    throw new Error(
+      apiMessage ??
+        "Generation Cloudinary impossible (verifie que les photos source existent et que les transformations video sont autorisees).",
+    );
   }
 
   const thumbnailUrl =

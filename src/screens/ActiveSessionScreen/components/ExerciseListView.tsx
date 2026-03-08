@@ -12,6 +12,7 @@ export function ExerciseListView({
   isSessionCompleted,
   isFinalizingSession,
   onStartExercise,
+  onEditExercise,
   onAddExercise,
   onFinalizeSession,
   onOpenSummary,
@@ -64,14 +65,25 @@ export function ExerciseListView({
                 </p>
                 <p className="mt-1 text-xs text-slate-500">Repos: {exercise.restSec} sec</p>
               </div>
-              <button
-                type="button"
-                disabled={isBusy || isCompleted}
-                onClick={() => onStartExercise(exercise.key)}
-                className="flex h-10 shrink-0 items-center justify-center rounded-full bg-primary/10 px-3 text-sm font-bold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isCompleted ? "Termine" : isInProgress ? "Reprendre" : "Demarrer"}
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onEditExercise(exercise.key)}
+                  disabled={isBusy}
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/20 text-slate-200 transition-colors hover:border-primary/35 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  aria-label={`Modifier ${exercise.exerciseName}`}
+                >
+                  <span className="material-symbols-outlined text-base">edit</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isBusy || isCompleted}
+                  onClick={() => onStartExercise(exercise.key)}
+                  className="flex h-10 items-center justify-center rounded-full bg-primary/10 px-3 text-sm font-bold text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isCompleted ? "Termine" : isInProgress ? "Reprendre" : "Demarrer"}
+                </button>
+              </div>
             </article>
           );
         })}

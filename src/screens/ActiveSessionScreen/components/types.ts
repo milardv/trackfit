@@ -1,4 +1,4 @@
-import type { RuntimeExercise, SessionView } from "../types.ts";
+import type { ExerciseEditDraft, RuntimeExercise, SessionView } from "../types.ts";
 
 export interface ActiveSessionHeaderProps {
   view: SessionView;
@@ -19,6 +19,7 @@ export interface ExerciseListViewProps {
   isSessionCompleted: boolean;
   isFinalizingSession: boolean;
   onStartExercise: (exerciseKey: string) => void;
+  onEditExercise: (exerciseKey: string) => void;
   onAddExercise: () => void;
   onFinalizeSession: () => void;
   onOpenSummary: () => void;
@@ -31,12 +32,14 @@ export interface ExerciseActiveViewProps {
     minutes: string;
     seconds: string;
   };
+  durationCountdownRemainingSec: number | null;
   activeSetTarget: number;
   currentSetNumber: number;
   progressPercent: number;
   isActiveExerciseReadyToComplete: boolean;
   isBusy: boolean;
   restRemainingSec: number;
+  onEditExercise: () => void;
   onCompleteExercise: () => void;
   onLogSet: () => void;
   onSkipRest: () => void;
@@ -45,4 +48,13 @@ export interface ExerciseActiveViewProps {
 export interface SessionDoneViewProps {
   completedCount: number;
   onClose: () => void;
+}
+
+export interface ExerciseEditModalProps {
+  draft: ExerciseEditDraft;
+  isSaving: boolean;
+  errorMessage: string | null;
+  onChange: (patch: Partial<ExerciseEditDraft>) => void;
+  onClose: () => void;
+  onSave: () => void;
 }
