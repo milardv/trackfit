@@ -60,7 +60,16 @@ export function SelectedExerciseList({
             </div>
 
             <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary/15 text-primary">
-              <span className="material-symbols-outlined">fitness_center</span>
+              {exercise.media?.imageUrl ? (
+                <img
+                  src={exercise.media.imageUrl}
+                  alt={exercise.name}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <span className="material-symbols-outlined">fitness_center</span>
+              )}
             </div>
 
             <div className="min-w-0 flex-1">
@@ -76,6 +85,20 @@ export function SelectedExerciseList({
                   {getExerciseTarget(exercise)}
                 </span>
               </div>
+              {exercise.media?.imageUrl || exercise.hasVideo || exercise.isMachine ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {exercise.hasVideo ? (
+                    <span className="rounded-md bg-cyan-400/10 px-2 py-0.5 text-xs text-cyan-300">
+                      Video
+                    </span>
+                  ) : null}
+                  {exercise.isMachine ? (
+                    <span className="rounded-md bg-emerald-400/10 px-2 py-0.5 text-xs text-emerald-300">
+                      Machine
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <button

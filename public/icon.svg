@@ -1,0 +1,21 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="128" fill="#102216"/>
+  <rect x="36" y="36" width="440" height="440" rx="110" fill="url(#bgGlow)"/>
+  <rect x="116" y="236" width="280" height="40" rx="20" fill="#13EC5B"/>
+  <rect x="92" y="192" width="20" height="128" rx="10" fill="#13EC5B"/>
+  <rect x="400" y="192" width="20" height="128" rx="10" fill="#13EC5B"/>
+  <rect x="70" y="170" width="18" height="172" rx="9" fill="#D8FFE6"/>
+  <rect x="424" y="170" width="18" height="172" rx="9" fill="#D8FFE6"/>
+  <rect x="136" y="176" width="30" height="160" rx="15" fill="#13EC5B" opacity="0.9"/>
+  <rect x="346" y="176" width="30" height="160" rx="15" fill="#13EC5B" opacity="0.9"/>
+  <rect x="178" y="146" width="156" height="220" rx="56" fill="#173523" stroke="#13EC5B" stroke-width="16"/>
+  <path d="M222 250C222 229.013 239.013 212 260 212H284V244H260C256.686 244 254 246.686 254 250V266H222V250Z" fill="#D8FFE6"/>
+  <path d="M242 212H320V244H242V212Z" fill="#13EC5B"/>
+  <path d="M254 266H294V300H254V266Z" fill="#13EC5B"/>
+  <defs>
+    <radialGradient id="bgGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 160) rotate(90) scale(316)">
+      <stop stop-color="#1E4B2E"/>
+      <stop offset="1" stop-color="#102216"/>
+    </radialGradient>
+  </defs>
+</svg>

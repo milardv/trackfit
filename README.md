@@ -38,6 +38,76 @@ Pour que les requetes Gemini fonctionnent apres deploiement GitHub Pages:
 2. Ajouter un secret `GEMINI_API_KEY` avec ta cle API
 3. Relancer le workflow `Deploy to GitHub Pages`
 
+## Sync Wger vers sharedExercises
+
+Le repo contient maintenant un script de sync pour peupler `sharedExercises`
+depuis l'API officielle Wger, avec:
+
+- preference de traduction FR, fallback EN puis premiere traduction disponible
+- mapping de categorie vers des labels compatibles Trackfit
+- reprise des consignes texte depuis la description Wger
+- selection du media principal (image/video) quand il existe
+- conservation de la licence source Wger
+- tag `isMachine` et `trackingMode` inferes par heuristiques
+
+### Prerequis Firebase
+
+Le script ecrit avec `firebase-admin`, donc il lui faut des credentials admin.
+Tu peux utiliser au choix:
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON` avec le JSON complet du service account
+- `GOOGLE_APPLICATION_CREDENTIALS` pointant vers un fichier JSON local
+
+Optionnel:
+
+- `FIREBASE_PROJECT_ID` pour forcer le projet cible
+
+### Commandes
+
+Dry run sans ecriture Firestore:
+
+```bash
+npm run sync:shared-exercises -- --dry-run --limit 20
+```
+
+Sync complet:
+
+```bash
+npm run sync:shared-exercises
+```
+
+Options utiles:
+
+- `--limit 100` pour tronquer le nombre d'exercices synchronises
+- `--page-size 100` pour ajuster la pagination Wger
+- `--skip-deactivate-missing` pour ne pas desactiver les anciens docs Wger absents du fetch courant
+
+## Assets PWA
+
+Les icones PWA sont generees automatiquement a partir de `public/icon.svg`.
+
+### Prerequis
+
+- `ffmpeg` installe sur la machine
+
+### Commande
+
+```bash
+npm run generate:pwa-assets
+```
+
+Fichiers regeneres:
+
+- `public/icon-192.png`
+- `public/icon-512.png`
+- `public/apple-touch-icon.png`
+
+Tu peux aussi fournir une autre source SVG:
+
+```bash
+npm run generate:pwa-assets -- --input public/mon-icon.svg
+```
+
 ## Estimation IA (duree + calories)
 
 La creation de seance utilise une estimation locale + Gemini directement depuis le front.

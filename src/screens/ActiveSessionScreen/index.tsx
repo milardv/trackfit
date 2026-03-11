@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExercisePickerScreen } from "../ExercisePickerScreen/index.tsx";
-import type { ExercisePickerOption } from "../ExercisePickerScreen/types.ts";
+import type {
+  ExercisePickerOption,
+  SharedExercisePickerOption,
+} from "../ExercisePickerScreen/types.ts";
 import {
   ExerciseConfigScreen,
   type ExerciseConfig,
@@ -11,7 +14,9 @@ import {
   clearRestTimer,
   endExercise,
   endSession,
+  importSharedExerciseToUser,
   listExercises,
+  listSharedExercises,
   logSet,
   startExercise,
   startRestAfterSet,
@@ -58,43 +63,65 @@ function getDurationTargetSec(exercise: RuntimeExercise | null): number | null {
   return normalizedDuration > 0 ? normalizedDuration : null;
 }
 
-function playDurationCountdownDoneSound(): void {
-  if (typeof window === "undefined" || typeof window.AudioContext === "undefined") {
+async function playCountdownDoneSound(
+  context: AudioContext | null,
+  kind: "duration" | "rest",
+): Promise<void> {
+  if (!context) {
     return;
   }
 
   try {
-    const context = new window.AudioContext();
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+
     const now = context.currentTime;
     const master = context.createGain();
     master.connect(context.destination);
     master.gain.setValueAtTime(0.0001, now);
-    master.gain.exponentialRampToValueAtTime(0.055, now + 0.03);
-    master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+    master.gain.exponentialRampToValueAtTime(kind === "rest" ? 0.07 : 0.055, now + 0.03);
 
-    const lowTone = context.createOscillator();
-    lowTone.type = "sine";
-    lowTone.frequency.setValueAtTime(720, now);
-    lowTone.frequency.exponentialRampToValueAtTime(620, now + 0.4);
-    lowTone.connect(master);
+    if (kind === "rest") {
+      master.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
 
-    const highTone = context.createOscillator();
-    const highToneGain = context.createGain();
-    highTone.type = "triangle";
-    highTone.frequency.setValueAtTime(1080, now);
-    highTone.frequency.exponentialRampToValueAtTime(900, now + 0.32);
-    highToneGain.gain.setValueAtTime(0.4, now);
-    highTone.connect(highToneGain);
-    highToneGain.connect(master);
+      const firstTone = context.createOscillator();
+      firstTone.type = "triangle";
+      firstTone.frequency.setValueAtTime(880, now);
+      firstTone.connect(master);
 
-    lowTone.start(now);
-    highTone.start(now + 0.01);
-    lowTone.stop(now + 0.45);
-    highTone.stop(now + 0.33);
+      const secondTone = context.createOscillator();
+      secondTone.type = "triangle";
+      secondTone.frequency.setValueAtTime(1175, now + 0.24);
+      secondTone.connect(master);
 
-    window.setTimeout(() => {
-      void context.close();
-    }, 700);
+      firstTone.start(now);
+      firstTone.stop(now + 0.18);
+      secondTone.start(now + 0.24);
+      secondTone.stop(now + 0.48);
+    } else {
+      master.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+      const lowTone = context.createOscillator();
+      lowTone.type = "sine";
+      lowTone.frequency.setValueAtTime(720, now);
+      lowTone.frequency.exponentialRampToValueAtTime(620, now + 0.4);
+      lowTone.connect(master);
+
+      const highTone = context.createOscillator();
+      const highToneGain = context.createGain();
+      highTone.type = "triangle";
+      highTone.frequency.setValueAtTime(1080, now);
+      highTone.frequency.exponentialRampToValueAtTime(900, now + 0.32);
+      highToneGain.gain.setValueAtTime(0.4, now);
+      highTone.connect(highToneGain);
+      highToneGain.connect(master);
+
+      lowTone.start(now);
+      highTone.start(now + 0.01);
+      lowTone.stop(now + 0.45);
+      highTone.stop(now + 0.33);
+    }
   } catch {
     // Ignore browsers/devices where the sound cannot be played.
   }
@@ -119,7 +146,14 @@ export function ActiveSessionScreen({
   const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState("");
   const [availableExercises, setAvailableExercises] = useState<ExercisePickerOption[]>([]);
+  const [sharedExercises, setSharedExercises] = useState<SharedExercisePickerOption[]>(
+    [],
+  );
   const [isLoadingExercises, setIsLoadingExercises] = useState(false);
+  const [isLoadingSharedExercises, setIsLoadingSharedExercises] = useState(false);
+  const [importingSharedExerciseId, setImportingSharedExerciseId] = useState<string | null>(
+    null,
+  );
   const [isExerciseConfigOpen, setIsExerciseConfigOpen] = useState(false);
   const [returnToPickerAfterExerciseConfig, setReturnToPickerAfterExerciseConfig] =
     useState(false);
@@ -134,7 +168,9 @@ export function ActiveSessionScreen({
   const [durationCountdown, setDurationCountdown] = useState<DurationCountdownState | null>(
     null,
   );
+  const countdownAudioContextRef = useRef<AudioContext | null>(null);
   const durationCountdownSoundSetKeyRef = useRef<string | null>(null);
+  const restCountdownSoundEndAtMsRef = useRef<number | null>(null);
 
   const [exercises, setExercises] = useState<RuntimeExercise[]>(() =>
     plan.exercises
@@ -155,7 +191,41 @@ export function ActiveSessionScreen({
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      const audioContext = countdownAudioContextRef.current;
+      countdownAudioContextRef.current = null;
+      if (audioContext && audioContext.state !== "closed") {
+        void audioContext.close();
+      }
     };
+  }, []);
+
+  const ensureCountdownAudioReady = useCallback((): AudioContext | null => {
+    if (typeof window === "undefined" || typeof window.AudioContext === "undefined") {
+      return null;
+    }
+
+    const current = countdownAudioContextRef.current;
+    if (current && current.state !== "closed") {
+      if (current.state === "suspended") {
+        void current.resume().catch(() => {
+          // Ignore browsers/devices where resume is not possible.
+        });
+      }
+      return current;
+    }
+
+    try {
+      const nextContext = new window.AudioContext();
+      countdownAudioContextRef.current = nextContext;
+      if (nextContext.state === "suspended") {
+        void nextContext.resume().catch(() => {
+          // Ignore browsers/devices where resume is not possible.
+        });
+      }
+      return nextContext;
+    } catch {
+      return null;
+    }
   }, []);
 
   useEffect(() => {
@@ -181,11 +251,26 @@ export function ActiveSessionScreen({
 
     let cancelled = false;
     setIsLoadingExercises(true);
+    setIsLoadingSharedExercises(true);
 
-    void listExercises(userId)
-      .then((items) => {
+    void Promise.allSettled([listExercises(userId), listSharedExercises()])
+      .then(([itemsResult, sharedResult]) => {
+        if (itemsResult.status === "rejected") {
+          throw new Error("user-exercises-load-failed");
+        }
+
+        const items = itemsResult.value;
+        const shared =
+          sharedResult.status === "fulfilled" ? sharedResult.value : [];
+
         if (!cancelled) {
           setAvailableExercises(items);
+          setSharedExercises(shared);
+          if (sharedResult.status === "rejected") {
+            setErrorMessage(
+              "La bibliotheque partagee n a pas pu etre chargee. Verifie les regles Firestore et le projet Firebase.",
+            );
+          }
         }
       })
       .catch(() => {
@@ -198,6 +283,7 @@ export function ActiveSessionScreen({
       .finally(() => {
         if (!cancelled) {
           setIsLoadingExercises(false);
+          setIsLoadingSharedExercises(false);
         }
       });
 
@@ -297,8 +383,21 @@ export function ActiveSessionScreen({
     }
 
     durationCountdownSoundSetKeyRef.current = activeDurationSetKey;
-    playDurationCountdownDoneSound();
-  }, [activeDurationSetKey, durationCountdownRemainingSec]);
+    void playCountdownDoneSound(ensureCountdownAudioReady(), "duration");
+  }, [activeDurationSetKey, durationCountdownRemainingSec, ensureCountdownAudioReady]);
+
+  useEffect(() => {
+    if (restEndsAtMs === null || restRemainingSec !== 0) {
+      return;
+    }
+
+    if (restCountdownSoundEndAtMsRef.current === restEndsAtMs) {
+      return;
+    }
+
+    restCountdownSoundEndAtMsRef.current = restEndsAtMs;
+    void playCountdownDoneSound(ensureCountdownAudioReady(), "rest");
+  }, [ensureCountdownAudioReady, restEndsAtMs, restRemainingSec]);
 
   const allExercisesCompleted = totalCount > 0 && completedCount === totalCount;
   const selectedExerciseIds = useMemo(
@@ -608,6 +707,15 @@ export function ActiveSessionScreen({
         targetWeightKg: selectedExercise.defaultWeightKg,
         targetDurationSec: selectedExercise.defaultDurationSec,
         restSec: selectedExercise.defaultRestSec,
+        instructions: selectedExercise.instructions ?? null,
+        isMachine: selectedExercise.isMachine ?? false,
+        hasImage: selectedExercise.hasImage ?? false,
+        hasVideo: selectedExercise.hasVideo ?? false,
+        media: selectedExercise.media ?? null,
+        source: selectedExercise.source ?? null,
+        sourceUrl: selectedExercise.sourceUrl ?? null,
+        sourceId: selectedExercise.sourceId ?? null,
+        license: selectedExercise.license ?? null,
         status: "pending",
         sessionExerciseId: createdSessionExerciseId,
         startedAtMs: null,
@@ -619,6 +727,33 @@ export function ActiveSessionScreen({
     setIsSessionCompleted(false);
     setErrorMessage(null);
     closeExercisePicker();
+  };
+
+  const handleAddSharedExerciseToCurrentSession = async (
+    sharedExerciseId: string,
+  ): Promise<void> => {
+    if (importingSharedExerciseId) {
+      return;
+    }
+
+    setImportingSharedExerciseId(sharedExerciseId);
+    setErrorMessage(null);
+
+    try {
+      const importedExerciseId = await importSharedExerciseToUser(
+        userId,
+        sharedExerciseId,
+      );
+      const refreshedExercises = await listExercises(userId);
+      setAvailableExercises(refreshedExercises);
+      await handleAddExerciseToCurrentSession(importedExerciseId, refreshedExercises);
+    } catch {
+      setErrorMessage(
+        "Impossible d importer cet exercice partage pour le moment. Reessaie.",
+      );
+    } finally {
+      setImportingSharedExerciseId(null);
+    }
   };
 
   const handleCreateExerciseFromPicker = () => {
@@ -679,6 +814,8 @@ export function ActiveSessionScreen({
     if (isBusy) {
       return;
     }
+
+    ensureCountdownAudioReady();
 
     const exercise = exercises.find((item) => item.key === exerciseKey);
     if (!exercise || exercise.status === "completed") {
@@ -758,6 +895,8 @@ export function ActiveSessionScreen({
     if (isBusy || !sessionId || !activeExercise || !activeExercise.sessionExerciseId) {
       return;
     }
+
+    ensureCountdownAudioReady();
 
     if (restRemainingSec > 0) {
       return;
@@ -1075,14 +1214,20 @@ export function ActiveSessionScreen({
 
       {isExercisePickerOpen ? (
         <ExercisePickerScreen
-          exercises={availableExercises}
+          userExercises={availableExercises}
+          sharedExercises={sharedExercises}
           selectedExerciseIds={selectedExerciseIds}
           searchQuery={exerciseSearchQuery}
-          isLoading={isLoadingExercises}
+          isLoadingUserExercises={isLoadingExercises}
+          isLoadingSharedExercises={isLoadingSharedExercises}
+          importingSharedExerciseId={importingSharedExerciseId}
           onSearchChange={setExerciseSearchQuery}
           onClose={closeExercisePicker}
           onAddExercise={(exerciseId) => {
             void handleAddExerciseToCurrentSession(exerciseId);
+          }}
+          onAddSharedExercise={(sharedExerciseId) => {
+            void handleAddSharedExerciseToCurrentSession(sharedExerciseId);
           }}
           onCreateExercise={handleCreateExerciseFromPicker}
         />

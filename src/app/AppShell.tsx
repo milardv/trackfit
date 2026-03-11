@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { User } from "firebase/auth";
 import { BottomNav } from "../components/BottomNav.tsx";
+import { PwaInstallBanner } from "../components/PwaInstallBanner.tsx";
 import {
   CreateSessionScreen,
   type SessionConfig,
@@ -24,6 +25,7 @@ import {
   deletePlan,
   updatePlanWithItems,
 } from "../services/firestoreService.ts";
+import { usePwaInstallPrompt } from "../pwa/usePwaInstallPrompt.ts";
 import type { Screen } from "./navigation.ts";
 
 interface AppShellProps {
@@ -94,6 +96,8 @@ function renderScreen(screen: Screen, options: RenderScreenOptions) {
 export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   const [currentScreen, setCurrentScreen] = useState<Screen>("home");
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [isInstallBannerDismissed, setIsInstallBannerDismissed] = useState(false);
+  const [isInstallPromptPending, setIsInstallPromptPending] = useState(false);
   const [isExerciseConfigOpen, setIsExerciseConfigOpen] = useState(false);
   const [isCreatingExercise, setIsCreatingExercise] = useState(false);
   const [exerciseCreateError, setExerciseCreateError] = useState<string | null>(
@@ -108,6 +112,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   );
   const [activePlan, setActivePlan] = useState<WorkoutPlanToStart | null>(null);
   const [editingPlan, setEditingPlan] = useState<WorkoutPlanToStart | null>(null);
+  const { canInstall, isInstalled, showIosInstallHint, promptInstall } = usePwaInstallPrompt();
 
   const handleCreateExercise = () => {
     setExerciseCreateError(null);
@@ -271,6 +276,32 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
     setWorkoutRefreshKey((value) => value + 1);
   };
 
+  const handleInstallApp = async () => {
+    if (isInstallPromptPending) {
+      return;
+    }
+
+    setIsInstallPromptPending(true);
+
+    try {
+      const didInstall = await promptInstall();
+      if (didInstall) {
+        setIsInstallBannerDismissed(true);
+      }
+    } finally {
+      setIsInstallPromptPending(false);
+    }
+  };
+
+  const shouldShowInstallBanner =
+    !isInstalled
+    && !isInstallBannerDismissed
+    && !isQuickAddOpen
+    && !isExerciseConfigOpen
+    && !isSessionConfigOpen
+    && activePlan === null
+    && (canInstall || showIosInstallHint);
+
   return (
     <div className="min-h-screen bg-background-dark text-text-primary font-display">
       {renderScreen(currentScreen, {
@@ -287,6 +318,19 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
         setCurrentScreen={setCurrentScreen}
         onQuickAdd={() => setIsQuickAddOpen(true)}
       />
+
+      {shouldShowInstallBanner ? (
+        <PwaInstallBanner
+          mode={canInstall ? "prompt" : "ios_hint"}
+          isInstalling={isInstallPromptPending}
+          onInstall={() => {
+            void handleInstallApp();
+          }}
+          onDismiss={() => {
+            setIsInstallBannerDismissed(true);
+          }}
+        />
+      ) : null}
 
       {isQuickAddOpen ? (
         <QuickAddScreen
@@ -332,6 +376,15 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
                       defaultWeightKg: exercise.targetWeightKg,
                       defaultDurationSec: exercise.targetDurationSec,
                       defaultRestSec: exercise.restSec,
+                      instructions: exercise.instructions ?? null,
+                      isMachine: exercise.isMachine ?? false,
+                      hasImage: exercise.hasImage ?? false,
+                      hasVideo: exercise.hasVideo ?? false,
+                      media: exercise.media ?? null,
+                      source: exercise.source ?? null,
+                      sourceUrl: exercise.sourceUrl ?? null,
+                      sourceId: exercise.sourceId ?? null,
+                      license: exercise.license ?? null,
                     })),
                 }
               : null
@@ -352,7 +405,11 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
       ) : null}
 
       {authError ? (
-        <p className="fixed bottom-24 left-1/2 z-[70] w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-center text-xs font-medium text-rose-200">
+        <p
+          className={`fixed left-1/2 z-[70] w-[min(92vw,420px)] -translate-x-1/2 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-center text-xs font-medium text-rose-200 ${
+            shouldShowInstallBanner ? "bottom-48" : "bottom-24"
+          }`}
+        >
           {authError}
         </p>
       ) : null}

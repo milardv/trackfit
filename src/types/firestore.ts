@@ -41,6 +41,42 @@ export interface ExerciseDoc extends TimestampedDoc {
   defaultDurationSec: number | null;
   defaultRestSec: number;
   isActive: boolean;
+  sourceSharedExerciseId?: string | null;
+  instructions?: string | null;
+  isMachine?: boolean;
+  hasImage?: boolean;
+  hasVideo?: boolean;
+  media?: SharedExerciseMedia | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  sourceId?: string | null;
+  license?: string | null;
+}
+
+export interface SharedExerciseMedia {
+  imageUrl: string | null;
+  videoUrl: string | null;
+}
+
+export interface SharedExerciseDoc extends TimestampedDoc {
+  name: string;
+  category: string;
+  trackingMode: TrackingMode;
+  defaultSets: number;
+  defaultReps: number | null;
+  defaultWeightKg: number | null;
+  defaultDurationSec: number | null;
+  defaultRestSec: number;
+  instructions: string | null;
+  isActive: boolean;
+  isMachine: boolean;
+  hasImage: boolean;
+  hasVideo: boolean;
+  media: SharedExerciseMedia;
+  source: string;
+  sourceUrl: string | null;
+  sourceId: string | null;
+  license: string | null;
 }
 
 export interface PlanDoc extends TimestampedDoc {

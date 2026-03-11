@@ -26,6 +26,21 @@ Données structurelles et statiques.
     * `defaultRestSec` : 90
     * `createdAt` : "2026-03-01T10:00:00Z"
 
+* **`sharedExercises/{sharedExerciseId}`** (Bibliotheque partagee en lecture seule)
+    * `name` : "Leg Press"
+    * `category` : "legs"
+    * `trackingMode` : "weight_reps"
+    * `defaultSets` : 3 | `defaultReps` : 10 | `defaultRestSec` : 90
+    * `instructions` : "Placez les pieds a plat sur la plateforme..."
+    * `isMachine` : true
+    * `hasImage` : true | `hasVideo` : false
+    * `media.imageUrl` : "https://wger.de/media/..."
+    * `media.videoUrl` : null
+    * `source` : "wger"
+    * `sourceId` : "877"
+    * `sourceUrl` : "https://wger.de/api/v2/exerciseinfo/877/"
+    * `license` : "CC-BY-SA 4 | https://creativecommons.org/licenses/by-sa/4.0/deed.en"
+
 * **`exercises/{exerciseId}`** (Bibliothèque de référence)
     * `name` : "Développé Couché"
     * `category` : "push"
@@ -93,4 +108,3 @@ Collections plates pour les graphiques.
 * **`progressPhotos/{photoId}`** (Photos d'évolution)
     * `storagePath` : "users/uid/photos/2026_03_01_face.jpg"
     * `weightKgSnapshot` : 78.5
-

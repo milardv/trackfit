@@ -275,6 +275,15 @@ export function HomeScreen({
             targetWeightKg: item.targetWeightKg ?? null,
             targetDurationSec: item.targetDurationSec ?? null,
             restSec: Math.max(0, item.restSec),
+            instructions: linkedExercise?.instructions ?? null,
+            isMachine: linkedExercise?.isMachine ?? false,
+            hasImage: linkedExercise?.hasImage ?? false,
+            hasVideo: linkedExercise?.hasVideo ?? false,
+            media: linkedExercise?.media ?? null,
+            source: linkedExercise?.source ?? null,
+            sourceUrl: linkedExercise?.sourceUrl ?? null,
+            sourceId: linkedExercise?.sourceId ?? null,
+            license: linkedExercise?.license ?? null,
           };
         });
 

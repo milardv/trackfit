@@ -5,13 +5,19 @@ import {
   type ExerciseConfig,
 } from "../ExerciseConfigScreen/index.tsx";
 import { estimateSessionMetrics } from "../../services/sessionEstimationService.ts";
-import { createExercise, listExercises } from "../../services/firestoreService.ts";
+import {
+  createExercise,
+  importSharedExerciseToUser,
+  listExercises,
+  listSharedExercises,
+} from "../../services/firestoreService.ts";
 import type { SessionEstimationInput } from "../../types/sessionEstimation.ts";
 import type {
   CreateSessionScreenProps,
   ExerciseOption,
   SessionEstimate,
   SessionExerciseSelection,
+  SharedExerciseOption,
 } from "./types.ts";
 import { SelectedExerciseList } from "./components/SelectedExerciseList.tsx";
 import { SessionFooter } from "./components/SessionFooter.tsx";
@@ -38,6 +44,9 @@ export function CreateSessionScreen({
   const [availableExercises, setAvailableExercises] = useState<ExerciseOption[]>(
     [],
   );
+  const [sharedExercises, setSharedExercises] = useState<SharedExerciseOption[]>(
+    [],
+  );
   const [selectedExerciseIds, setSelectedExerciseIds] = useState<string[]>(
     initialConfig?.exercises.map((exercise) => exercise.id) ?? [],
   );
@@ -51,6 +60,10 @@ export function CreateSessionScreen({
     useState(false);
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState("");
   const [isLoadingExercises, setIsLoadingExercises] = useState(true);
+  const [isLoadingSharedExercises, setIsLoadingSharedExercises] = useState(true);
+  const [importingSharedExerciseId, setImportingSharedExerciseId] = useState<string | null>(
+    null,
+  );
   const [sessionEstimate, setSessionEstimate] = useState<SessionEstimate | null>(
     null,
   );
@@ -103,16 +116,34 @@ export function CreateSessionScreen({
 
     const loadExercises = async () => {
       setIsLoadingExercises(true);
+      setIsLoadingSharedExercises(true);
       setLocalError(null);
 
       try {
-        const exercises = await listExercises(userId);
+        const [exercisesResult, sharedResult] = await Promise.allSettled([
+          listExercises(userId),
+          listSharedExercises(),
+        ]);
+
+        if (exercisesResult.status === "rejected") {
+          throw new Error("user-exercises-load-failed");
+        }
+
+        const exercises = exercisesResult.value;
+        const shared =
+          sharedResult.status === "fulfilled" ? sharedResult.value : [];
 
         if (cancelled) {
           return;
         }
 
         setAvailableExercises(exercises);
+        setSharedExercises(shared);
+        if (sharedResult.status === "rejected") {
+          setLocalError(
+            "La bibliotheque partagee n a pas pu etre chargee. Verifie les regles Firestore et le projet Firebase.",
+          );
+        }
         setSelectedExerciseIds((previous) => {
           if (previous.length > 0) {
             return previous.filter((id) =>
@@ -136,6 +167,7 @@ export function CreateSessionScreen({
       } finally {
         if (!cancelled) {
           setIsLoadingExercises(false);
+          setIsLoadingSharedExercises(false);
         }
       }
     };
@@ -150,31 +182,41 @@ export function CreateSessionScreen({
   const selectedExercises = useMemo(() => {
     const byId = new Map(availableExercises.map((exercise) => [exercise.id, exercise]));
 
-    return selectedExerciseIds
-      .map((exerciseId) => {
-        const baseExercise = byId.get(exerciseId);
-        const initialExercise = initialExerciseById.get(exerciseId);
+    return selectedExerciseIds.reduce<SessionExerciseSelection[]>((accumulator, exerciseId) => {
+      const baseExercise = byId.get(exerciseId);
+      const initialExercise = initialExerciseById.get(exerciseId);
 
-        if (!baseExercise && !initialExercise) {
-          return null;
-        }
+      if (!baseExercise && !initialExercise) {
+        return accumulator;
+      }
 
-        return {
-          id: exerciseId,
-          name: initialExercise?.name ?? baseExercise?.name ?? "Exercice",
-          trackingMode:
-            initialExercise?.trackingMode ?? baseExercise?.trackingMode ?? "reps_only",
-          defaultSets: initialExercise?.defaultSets ?? baseExercise?.defaultSets ?? 3,
-          defaultReps: initialExercise?.defaultReps ?? baseExercise?.defaultReps ?? null,
-          defaultWeightKg:
-            initialExercise?.defaultWeightKg ?? baseExercise?.defaultWeightKg ?? null,
-          defaultDurationSec:
-            initialExercise?.defaultDurationSec ?? baseExercise?.defaultDurationSec ?? null,
-          defaultRestSec:
-            initialExercise?.defaultRestSec ?? baseExercise?.defaultRestSec ?? 30,
-        } satisfies SessionExerciseSelection;
-      })
-      .filter((exercise): exercise is SessionExerciseSelection => Boolean(exercise));
+      accumulator.push({
+        id: exerciseId,
+        name: initialExercise?.name ?? baseExercise?.name ?? "Exercice",
+        trackingMode:
+          initialExercise?.trackingMode ?? baseExercise?.trackingMode ?? "reps_only",
+        defaultSets: initialExercise?.defaultSets ?? baseExercise?.defaultSets ?? 3,
+        defaultReps: initialExercise?.defaultReps ?? baseExercise?.defaultReps ?? null,
+        defaultWeightKg:
+          initialExercise?.defaultWeightKg ?? baseExercise?.defaultWeightKg ?? null,
+        defaultDurationSec:
+          initialExercise?.defaultDurationSec ?? baseExercise?.defaultDurationSec ?? null,
+        defaultRestSec:
+          initialExercise?.defaultRestSec ?? baseExercise?.defaultRestSec ?? 30,
+        instructions:
+          initialExercise?.instructions ?? baseExercise?.instructions ?? null,
+        isMachine: initialExercise?.isMachine ?? baseExercise?.isMachine ?? false,
+        hasImage: initialExercise?.hasImage ?? baseExercise?.hasImage ?? false,
+        hasVideo: initialExercise?.hasVideo ?? baseExercise?.hasVideo ?? false,
+        media: initialExercise?.media ?? baseExercise?.media ?? null,
+        source: initialExercise?.source ?? baseExercise?.source ?? null,
+        sourceUrl: initialExercise?.sourceUrl ?? baseExercise?.sourceUrl ?? null,
+        sourceId: initialExercise?.sourceId ?? baseExercise?.sourceId ?? null,
+        license: initialExercise?.license ?? baseExercise?.license ?? null,
+      });
+
+      return accumulator;
+    }, []);
   }, [availableExercises, initialExerciseById, selectedExerciseIds]);
 
   const estimationInput = useMemo<SessionEstimationInput>(
@@ -229,6 +271,37 @@ export function CreateSessionScreen({
 
     setSelectedExerciseIds((previous) => [...previous, exerciseId]);
     setLocalError(null);
+  };
+
+  const handleAddSharedExercise = async (
+    sharedExerciseId: string,
+  ): Promise<void> => {
+    if (importingSharedExerciseId) {
+      return;
+    }
+
+    setImportingSharedExerciseId(sharedExerciseId);
+    setLocalError(null);
+
+    try {
+      const importedExerciseId = await importSharedExerciseToUser(
+        userId,
+        sharedExerciseId,
+      );
+      const exercises = await listExercises(userId);
+      setAvailableExercises(exercises);
+      setSelectedExerciseIds((previous) =>
+        previous.includes(importedExerciseId)
+          ? previous
+          : [...previous, importedExerciseId],
+      );
+    } catch {
+      setLocalError(
+        "Impossible d importer cet exercice partage pour le moment.",
+      );
+    } finally {
+      setImportingSharedExerciseId(null);
+    }
   };
 
   const openExercisePicker = () => {
@@ -370,7 +443,11 @@ export function CreateSessionScreen({
   };
 
   const displayedError = localError ?? errorMessage;
-  const isBusy = isSubmitting || isDeleting || isLoadingExercises;
+  const isBusy =
+    isSubmitting ||
+    isDeleting ||
+    isLoadingExercises ||
+    Boolean(importingSharedExerciseId);
 
   return (
     <div className="fixed inset-0 z-[96] mx-auto flex min-h-screen w-full max-w-md flex-col bg-background-dark text-text-primary shadow-2xl">
@@ -417,13 +494,17 @@ export function CreateSessionScreen({
 
       {isExercisePickerOpen ? (
         <ExercisePickerScreen
-          exercises={availableExercises}
+          userExercises={availableExercises}
+          sharedExercises={sharedExercises}
           selectedExerciseIds={selectedExerciseIds}
           searchQuery={exerciseSearchQuery}
-          isLoading={isLoadingExercises}
+          isLoadingUserExercises={isLoadingExercises}
+          isLoadingSharedExercises={isLoadingSharedExercises}
+          importingSharedExerciseId={importingSharedExerciseId}
           onSearchChange={setExerciseSearchQuery}
           onClose={closeExercisePicker}
           onAddExercise={addExerciseById}
+          onAddSharedExercise={handleAddSharedExercise}
           onCreateExercise={handleCreateExerciseFromPicker}
         />
       ) : null}

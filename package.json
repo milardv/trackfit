@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:pwa-assets": "node scripts/generatePwaAssets.mjs",
+    "sync:shared-exercises": "tsx scripts/syncSharedExercises.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -17,6 +19,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.10.0",
+    "firebase-admin": "^13.7.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.2.0",

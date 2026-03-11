@@ -1,6 +1,8 @@
 import type {
   EstimationSource,
   ExerciseDoc,
+  SharedExerciseMedia,
+  SharedExerciseDoc,
   TrackingMode,
 } from "../../types/firestore.ts";
 
@@ -13,6 +15,15 @@ export interface SessionExerciseSelection {
   defaultWeightKg: number | null;
   defaultDurationSec: number | null;
   defaultRestSec: number;
+  instructions?: string | null;
+  isMachine?: boolean;
+  hasImage?: boolean;
+  hasVideo?: boolean;
+  media?: SharedExerciseMedia | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  sourceId?: string | null;
+  license?: string | null;
 }
 
 export interface SessionConfig {
@@ -31,6 +42,7 @@ export interface SessionEstimate {
 }
 
 export type ExerciseOption = ExerciseDoc & { id: string };
+export type SharedExerciseOption = SharedExerciseDoc & { id: string };
 
 export interface CreateSessionScreenProps {
   userId: string;

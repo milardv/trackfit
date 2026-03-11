@@ -14,6 +14,7 @@ import {
   setDoc,
   Timestamp,
   writeBatch,
+  where,
   type PartialWithFieldValue,
   type WithFieldValue,
 } from "firebase/firestore";
@@ -28,6 +29,8 @@ import type {
   PlanDoc,
   PlanItemDoc,
   ProgressPhotoDoc,
+  SharedExerciseDoc,
+  SharedExerciseMedia,
   SessionDoc,
   SessionExerciseDoc,
   SessionExerciseStatus,
@@ -40,6 +43,9 @@ import type {
 const userDocRef = (uid: string) => doc(db, "users", uid);
 const exercisesCollectionRef = (uid: string) =>
   collection(db, "users", uid, "exercises");
+const sharedExercisesCollectionRef = () => collection(db, "sharedExercises");
+const sharedExerciseDocRef = (sharedExerciseId: string) =>
+  doc(db, "sharedExercises", sharedExerciseId);
 const plansCollectionRef = (uid: string) =>
   collection(db, "users", uid, "plans");
 const planDocRef = (uid: string, planId: string) =>
@@ -119,6 +125,16 @@ export interface CreateExerciseInput {
   defaultDurationSec?: number | null;
   defaultRestSec?: number;
   isActive?: boolean;
+  sourceSharedExerciseId?: string | null;
+  instructions?: string | null;
+  isMachine?: boolean;
+  hasImage?: boolean;
+  hasVideo?: boolean;
+  media?: SharedExerciseMedia | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  sourceId?: string | null;
+  license?: string | null;
 }
 
 export interface CreatePlanInput {
@@ -263,6 +279,85 @@ export interface AddExerciseTimelinePointInput {
   sessionId: string;
 }
 
+const EMPTY_SHARED_MEDIA: SharedExerciseMedia = {
+  imageUrl: null,
+  videoUrl: null,
+};
+
+function normalizeExerciseDoc(exercise: ExerciseDoc): ExerciseDoc {
+  return {
+    ...exercise,
+    instructions: exercise.instructions ?? null,
+    isMachine: exercise.isMachine ?? false,
+    hasImage: exercise.hasImage ?? Boolean(exercise.media?.imageUrl),
+    hasVideo: exercise.hasVideo ?? Boolean(exercise.media?.videoUrl),
+    media: exercise.media ?? EMPTY_SHARED_MEDIA,
+    source: exercise.source ?? null,
+    sourceUrl: exercise.sourceUrl ?? null,
+    sourceId: exercise.sourceId ?? null,
+    license: exercise.license ?? null,
+  };
+}
+
+function normalizeSharedExerciseDoc(exercise: SharedExerciseDoc): SharedExerciseDoc {
+  return {
+    ...exercise,
+    instructions: exercise.instructions ?? null,
+    media: exercise.media ?? EMPTY_SHARED_MEDIA,
+    hasImage: exercise.hasImage ?? Boolean(exercise.media?.imageUrl),
+    hasVideo: exercise.hasVideo ?? Boolean(exercise.media?.videoUrl),
+  };
+}
+
+function getImportedExerciseMetadata(sharedExercise: SharedExerciseDoc): Pick<
+  CreateExerciseInput,
+  | "instructions"
+  | "isMachine"
+  | "hasImage"
+  | "hasVideo"
+  | "media"
+  | "source"
+  | "sourceUrl"
+  | "sourceId"
+  | "license"
+> {
+  return {
+    instructions: sharedExercise.instructions ?? null,
+    isMachine: sharedExercise.isMachine,
+    hasImage: sharedExercise.hasImage,
+    hasVideo: sharedExercise.hasVideo,
+    media: sharedExercise.media ?? EMPTY_SHARED_MEDIA,
+    source: sharedExercise.source,
+    sourceUrl: sharedExercise.sourceUrl ?? null,
+    sourceId: sharedExercise.sourceId ?? null,
+    license: sharedExercise.license ?? null,
+  };
+}
+
+async function hydrateLegacyImportedExercise(
+  exercise: ExerciseDoc,
+): Promise<ExerciseDoc> {
+  if (!exercise.sourceSharedExerciseId || exercise.source) {
+    return exercise;
+  }
+
+  const sharedExerciseSnapshot = await getDoc(
+    sharedExerciseDocRef(exercise.sourceSharedExerciseId),
+  );
+  if (!sharedExerciseSnapshot.exists()) {
+    return exercise;
+  }
+
+  const sharedExercise = normalizeSharedExerciseDoc(
+    sharedExerciseSnapshot.data() as SharedExerciseDoc,
+  );
+
+  return {
+    ...exercise,
+    ...getImportedExerciseMetadata(sharedExercise),
+  };
+}
+
 export async function upsertUserProfile(
   uid: string,
   input: UpsertUserProfileInput,
@@ -305,6 +400,16 @@ export async function createExercise(
     defaultDurationSec: input.defaultDurationSec ?? null,
     defaultRestSec: input.defaultRestSec ?? 30,
     isActive: input.isActive ?? true,
+    sourceSharedExerciseId: input.sourceSharedExerciseId ?? null,
+    instructions: input.instructions ?? null,
+    isMachine: input.isMachine ?? false,
+    hasImage: input.hasImage ?? Boolean(input.media?.imageUrl),
+    hasVideo: input.hasVideo ?? Boolean(input.media?.videoUrl),
+    media: input.media ?? EMPTY_SHARED_MEDIA,
+    source: input.source ?? null,
+    sourceUrl: input.sourceUrl ?? null,
+    sourceId: input.sourceId ?? null,
+    license: input.license ?? null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -324,12 +429,98 @@ export async function listExercises(
   );
   const snapshot = await getDocs(exercisesQuery);
 
+  const exercises = await Promise.all(
+    snapshot.docs.map(async (document) => {
+      const normalizedExercise = normalizeExerciseDoc(document.data() as ExerciseDoc);
+      const hydratedExercise = await hydrateLegacyImportedExercise(normalizedExercise);
+
+      return {
+      id: document.id,
+        ...hydratedExercise,
+      };
+    }),
+  );
+
+  return exercises.filter((exercise) => exercise.isActive);
+}
+
+export async function listSharedExercises(
+  maxItems = 500,
+): Promise<Array<SharedExerciseDoc & { id: string }>> {
+  const sharedExercisesQuery = query(
+    sharedExercisesCollectionRef(),
+    orderBy("name", "asc"),
+    limit(maxItems),
+  );
+  const snapshot = await getDocs(sharedExercisesQuery);
+
   return snapshot.docs
     .map((document) => ({
       id: document.id,
-      ...(document.data() as ExerciseDoc),
+      ...normalizeSharedExerciseDoc(document.data() as SharedExerciseDoc),
     }))
     .filter((exercise) => exercise.isActive);
+}
+
+export async function importSharedExerciseToUser(
+  uid: string,
+  sharedExerciseId: string,
+): Promise<string> {
+  const existingExerciseQuery = query(
+    exercisesCollectionRef(uid),
+    where("sourceSharedExerciseId", "==", sharedExerciseId),
+    limit(1),
+  );
+  const existingExerciseSnapshot = await getDocs(existingExerciseQuery);
+  const sharedExerciseSnapshot = await getDoc(sharedExerciseDocRef(sharedExerciseId));
+
+  if (!existingExerciseSnapshot.empty) {
+    const existingExerciseDocument = existingExerciseSnapshot.docs[0];
+    const existingExercise = existingExerciseDocument.data() as ExerciseDoc;
+    const metadataPatch =
+      sharedExerciseSnapshot.exists()
+        ? getImportedExerciseMetadata(
+            normalizeSharedExerciseDoc(sharedExerciseSnapshot.data() as SharedExerciseDoc),
+          )
+        : {};
+
+    await setDoc(
+      existingExerciseDocument.ref,
+      {
+        ...metadataPatch,
+        isActive: existingExercise.isActive ? existingExercise.isActive : true,
+        updatedAt: serverTimestamp(),
+      } satisfies PartialWithFieldValue<ExerciseDoc>,
+      { merge: true },
+    );
+
+    return existingExerciseDocument.id;
+  }
+
+  if (!sharedExerciseSnapshot.exists()) {
+    throw new Error(`Exercice partage "${sharedExerciseId}" introuvable.`);
+  }
+
+  const sharedExercise = normalizeSharedExerciseDoc(
+    sharedExerciseSnapshot.data() as SharedExerciseDoc,
+  );
+  if (!sharedExercise.isActive) {
+    throw new Error(`Exercice partage "${sharedExerciseId}" inactif.`);
+  }
+
+  return createExercise(uid, {
+    name: sharedExercise.name,
+    category: sharedExercise.category,
+    trackingMode: sharedExercise.trackingMode,
+    defaultSets: sharedExercise.defaultSets,
+    defaultReps: sharedExercise.defaultReps,
+    defaultWeightKg: sharedExercise.defaultWeightKg,
+    defaultDurationSec: sharedExercise.defaultDurationSec,
+    defaultRestSec: sharedExercise.defaultRestSec,
+    isActive: true,
+    sourceSharedExerciseId: sharedExerciseId,
+    ...getImportedExerciseMetadata(sharedExercise),
+  });
 }
 
 export async function listPlans(

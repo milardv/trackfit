@@ -47,14 +47,24 @@ export function ExerciseListView({
         {exercises.map((exercise) => {
           const isCompleted = exercise.status === "completed";
           const isInProgress = exercise.status === "in_progress";
+          const imageUrl = exercise.media?.imageUrl ?? null;
 
           return (
             <article
               key={exercise.key}
               className="flex items-center gap-3 rounded-xl border border-white/5 bg-card-dark p-3"
             >
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <span className="material-symbols-outlined">fitness_center</span>
+              <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-primary/10 text-primary">
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt={exercise.exerciseName}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="material-symbols-outlined">fitness_center</span>
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-base font-bold text-white">
@@ -64,6 +74,20 @@ export function ExerciseListView({
                   {getExerciseTargetLabel(exercise)}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">Repos: {exercise.restSec} sec</p>
+                {exercise.hasVideo || exercise.isMachine ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {exercise.hasVideo ? (
+                      <span className="rounded-md bg-cyan-400/10 px-2 py-0.5 text-xs text-cyan-300">
+                        Video
+                      </span>
+                    ) : null}
+                    {exercise.isMachine ? (
+                      <span className="rounded-md bg-emerald-400/10 px-2 py-0.5 text-xs text-emerald-300">
+                        Machine
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <button

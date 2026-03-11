@@ -1,0 +1,38 @@
+{
+  "id": "./",
+  "name": "TrackFit",
+  "short_name": "TrackFit",
+  "description": "TrackFit t aide a creer tes seances, logguer tes series et suivre ta progression depuis ton smartphone.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#102216",
+  "theme_color": "#102216",
+  "lang": "fr",
+  "categories": [
+    "health",
+    "fitness",
+    "sports"
+  ],
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

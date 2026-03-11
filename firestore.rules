@@ -20,6 +20,12 @@ service cloud.firestore {
       }
     }
 
+    // Shared exercise catalog maintained out-of-band (admin/sync job).
+    match /sharedExercises/{exerciseId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     // Deny anything outside /users/{uid}/...
     match /{document=**} {
       allow read, write: if false;
