@@ -17,6 +17,7 @@ import {
 import type {
   EffortPickerConfig,
   EffortType,
+  ExerciseConfig,
   ExerciseConfigScreenProps,
 } from "./types.ts";
 import { clamp, toNumber } from "./utils.ts";
@@ -25,22 +26,61 @@ import { ExerciseConfigFooterNav } from "./components/ExerciseConfigFooterNav.ts
 
 export type { ExerciseConfig } from "./types.ts";
 
+function getInitialFormState(initialConfig?: ExerciseConfig | null) {
+  const trackingMode = initialConfig?.trackingMode ?? "reps_only";
+  const effortType: EffortType =
+    trackingMode === "duration_only" ? "duration" : "reps";
+
+  return {
+    name: initialConfig?.name ?? "Gainage",
+    sets: initialConfig?.sets ?? 3,
+    hasWeight: trackingMode === "weight_reps",
+    weightKg: initialConfig?.weightKg ?? 20,
+    reps: initialConfig?.reps ?? 12,
+    durationSec: initialConfig?.durationSec ?? 40,
+    restSec: initialConfig?.restSec ?? 30,
+    effortType,
+  };
+}
+
 export function ExerciseConfigScreen({
   onBack,
   onCreate,
+  onDelete,
+  initialConfig = null,
+  mode = "create",
   isSubmitting = false,
+  isDeleting = false,
   errorMessage = null,
   zIndexClass = "z-[95]",
 }: ExerciseConfigScreenProps) {
-  const [name, setName] = useState("Gainage");
-  const [sets, setSets] = useState(3);
-  const [hasWeight, setHasWeight] = useState(false);
-  const [weightKg, setWeightKg] = useState(20);
-  const [reps, setReps] = useState(12);
-  const [durationSec, setDurationSec] = useState(40);
-  const [restSec, setRestSec] = useState(30);
-  const [effortType, setEffortType] = useState<EffortType>("reps");
+  const initialState = useMemo(
+    () => getInitialFormState(initialConfig),
+    [initialConfig],
+  );
+  const [name, setName] = useState(initialState.name);
+  const [sets, setSets] = useState(initialState.sets);
+  const [hasWeight, setHasWeight] = useState(initialState.hasWeight);
+  const [weightKg, setWeightKg] = useState(initialState.weightKg);
+  const [reps, setReps] = useState(initialState.reps);
+  const [durationSec, setDurationSec] = useState(initialState.durationSec);
+  const [restSec, setRestSec] = useState(initialState.restSec);
+  const [effortType, setEffortType] = useState<EffortType>(initialState.effortType);
   const [pickerType, setPickerType] = useState<EffortType | null>(null);
+  const isEditMode = mode === "edit";
+  const isBusy = isSubmitting || isDeleting;
+
+  useEffect(() => {
+    setName(initialState.name);
+    setSets(initialState.sets);
+    setHasWeight(initialState.hasWeight);
+    setWeightKg(initialState.weightKg);
+    setReps(initialState.reps);
+    setDurationSec(initialState.durationSec);
+    setRestSec(initialState.restSec);
+    setEffortType(initialState.effortType);
+    setPickerType(null);
+  }, [initialState]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -190,7 +230,7 @@ export function ExerciseConfigScreen({
             </span>
           </button>
           <h2 className="flex-1 text-center text-lg font-bold leading-tight tracking-tight text-white">
-            Configuration d&apos;Exercice
+            {isEditMode ? "Modifier l exercice" : "Configuration d exercice"}
           </h2>
           <div className="size-10" />
         </header>
@@ -198,10 +238,12 @@ export function ExerciseConfigScreen({
         <main className="hide-scrollbar flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 pb-[calc(12rem+env(safe-area-inset-bottom))]">
           <div className="pb-6 pt-2">
             <h1 className="text-left text-[28px] font-bold leading-tight tracking-tight text-white">
-              Personnalisez l&apos;effort
+              {isEditMode ? "Ajustez l effort" : "Personnalisez l effort"}
             </h1>
             <p className="text-base font-normal leading-normal text-text-secondary">
-              Configurez les parametres selon le type d&apos;exercice.
+              {isEditMode
+                ? "Mettez a jour les parametres de base de cet exercice."
+                : "Configurez les parametres selon le type d exercice."}
             </p>
           </div>
 
@@ -429,13 +471,37 @@ export function ExerciseConfigScreen({
             <button
               type="button"
               onClick={submitConfig}
-              disabled={isSubmitting}
+              disabled={isBusy}
               className="flex h-14 w-full items-center justify-center gap-2 rounded-full bg-primary text-lg font-bold text-background-dark shadow-lg shadow-primary/20 transition-all hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-70"
             >
               <span className="material-symbols-outlined">check_circle</span>
-              {isSubmitting ? "Creation..." : "Confirmer l exercice"}
+              {isBusy
+                ? isDeleting
+                  ? "Suppression..."
+                  : isEditMode
+                    ? "Enregistrement..."
+                    : "Creation..."
+                : isEditMode
+                  ? "Enregistrer l exercice"
+                  : "Confirmer l exercice"}
             </button>
           </div>
+
+          {isEditMode && onDelete ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  void onDelete();
+                }}
+                disabled={isBusy}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-full border border-rose-400/30 bg-rose-500/10 text-sm font-bold text-rose-200 transition-colors hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <span className="material-symbols-outlined text-[20px]">delete</span>
+                Supprimer l exercice
+              </button>
+            </div>
+          ) : null}
 
           {errorMessage ? (
             <p className="mt-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">

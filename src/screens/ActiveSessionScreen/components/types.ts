@@ -53,8 +53,11 @@ export interface SessionDoneViewProps {
 export interface ExerciseEditModalProps {
   draft: ExerciseEditDraft;
   isSaving: boolean;
+  isRemoving?: boolean;
   errorMessage: string | null;
+  canRemove?: boolean;
   onChange: (patch: Partial<ExerciseEditDraft>) => void;
   onClose: () => void;
   onSave: () => void;
+  onRemove?: () => void;
 }

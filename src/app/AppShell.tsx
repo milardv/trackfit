@@ -151,6 +151,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
       setCurrentScreen("workout");
       setIsExerciseConfigOpen(false);
       setIsQuickAddOpen(false);
+      setWorkoutRefreshKey((value) => value + 1);
     } catch {
       setExerciseCreateError(
         "Impossible de creer l exercice pour le moment. Reessaie dans un instant.",

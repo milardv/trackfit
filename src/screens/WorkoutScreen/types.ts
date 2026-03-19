@@ -1,4 +1,5 @@
 import type {
+  ExerciseDoc,
   EstimationSource,
   SharedExerciseMedia,
   TrackingMode,
@@ -10,6 +11,12 @@ export interface WorkoutScreenProps {
   onStartPlan: (plan: WorkoutPlanToStart) => void;
   onEditPlan: (plan: WorkoutPlanToStart) => void;
   refreshKey?: number;
+}
+
+export type WorkoutScreenTab = "plans" | "exercises";
+
+export interface WorkoutExerciseCard extends ExerciseDoc {
+  id: string;
 }
 
 export interface WorkoutPlanExercise {

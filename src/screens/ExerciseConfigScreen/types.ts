@@ -32,7 +32,11 @@ export interface ExerciseConfig {
 export interface ExerciseConfigScreenProps {
   onBack: () => void;
   onCreate: (config: ExerciseConfig) => Promise<void> | void;
+  onDelete?: () => Promise<void> | void;
+  initialConfig?: ExerciseConfig | null;
+  mode?: "create" | "edit";
   isSubmitting?: boolean;
+  isDeleting?: boolean;
   errorMessage?: string | null;
   zIndexClass?: string;
 }

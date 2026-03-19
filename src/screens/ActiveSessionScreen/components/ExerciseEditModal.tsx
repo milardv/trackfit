@@ -7,11 +7,16 @@ function toText(value: number | null): string {
 export function ExerciseEditModal({
   draft,
   isSaving,
+  isRemoving = false,
   errorMessage,
+  canRemove = false,
   onChange,
   onClose,
   onSave,
+  onRemove,
 }: ExerciseEditModalProps) {
+  const isBusy = isSaving || isRemoving;
+
   return (
     <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/80 p-4 sm:items-center">
       <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-white/10 bg-background-dark">
@@ -20,7 +25,7 @@ export function ExerciseEditModal({
           <button
             type="button"
             onClick={onClose}
-            disabled={isSaving}
+            disabled={isBusy}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-card-dark text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
             aria-label="Fermer la modification"
           >
@@ -156,6 +161,12 @@ export function ExerciseEditModal({
             Sets deja enregistres: {draft.loggedSetsCount}
           </p>
 
+          {onRemove && !canRemove ? (
+            <p className="text-xs text-amber-200">
+              Un exercice avec des sets enregistres ne peut plus etre retire de la seance.
+            </p>
+          ) : null}
+
           {errorMessage ? (
             <p className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
               {errorMessage}
@@ -163,19 +174,33 @@ export function ExerciseEditModal({
           ) : null}
         </div>
 
-        <footer className="grid grid-cols-2 gap-2 border-t border-white/10 p-4">
+        <footer
+          className={`grid gap-2 border-t border-white/10 p-4 ${
+            onRemove ? "grid-cols-3" : "grid-cols-2"
+          }`}
+        >
           <button
             type="button"
             onClick={onClose}
-            disabled={isSaving}
+            disabled={isBusy}
             className="flex h-11 items-center justify-center rounded-xl border border-white/20 bg-card-dark text-sm font-semibold text-white transition-colors hover:border-white/35 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Annuler
           </button>
+          {onRemove ? (
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={isBusy || !canRemove}
+              className="flex h-11 items-center justify-center rounded-xl border border-rose-400/30 bg-rose-500/10 text-sm font-bold text-rose-200 transition-colors hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRemoving ? "Retrait..." : "Retirer"}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onSave}
-            disabled={isSaving}
+            disabled={isBusy}
             className="flex h-11 items-center justify-center rounded-xl bg-primary text-sm font-bold text-background-dark transition-colors hover:bg-[#0fdc53] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSaving ? "Enregistrement..." : "Enregistrer"}

@@ -12,6 +12,7 @@ import {
   addSessionExercise,
   createExercise,
   clearRestTimer,
+  deleteSessionExercise,
   endExercise,
   endSession,
   importSharedExerciseToUser,
@@ -165,6 +166,7 @@ export function ActiveSessionScreen({
   );
   const [exerciseEditError, setExerciseEditError] = useState<string | null>(null);
   const [isSavingExerciseEdit, setIsSavingExerciseEdit] = useState(false);
+  const [isRemovingExerciseEdit, setIsRemovingExerciseEdit] = useState(false);
   const [durationCountdown, setDurationCountdown] = useState<DurationCountdownState | null>(
     null,
   );
@@ -499,7 +501,13 @@ export function ActiveSessionScreen({
   };
 
   const openExerciseEditor = (exerciseKey: string) => {
-    if (isBusy || isFinalizingSession || isSessionCompleted || isSavingExerciseEdit) {
+    if (
+      isBusy
+      || isFinalizingSession
+      || isSessionCompleted
+      || isSavingExerciseEdit
+      || isRemovingExerciseEdit
+    ) {
       return;
     }
 
@@ -523,7 +531,7 @@ export function ActiveSessionScreen({
   };
 
   const closeExerciseEditor = () => {
-    if (isSavingExerciseEdit) {
+    if (isSavingExerciseEdit || isRemovingExerciseEdit) {
       return;
     }
 
@@ -548,6 +556,7 @@ export function ActiveSessionScreen({
       !editingExerciseKey ||
       !exerciseEditDraft ||
       isSavingExerciseEdit ||
+      isRemovingExerciseEdit ||
       isBusy
     ) {
       return;
@@ -646,6 +655,67 @@ export function ActiveSessionScreen({
       );
     } finally {
       setIsSavingExerciseEdit(false);
+    }
+  };
+
+  const handleRemoveExerciseFromSession = async () => {
+    if (
+      !editingExerciseKey
+      || !exerciseEditDraft
+      || isSavingExerciseEdit
+      || isRemovingExerciseEdit
+      || isBusy
+    ) {
+      return;
+    }
+
+    const exercise = exercises.find((item) => item.key === editingExerciseKey);
+    if (!exercise) {
+      return;
+    }
+
+    if (exercise.loggedSets.length > 0) {
+      setExerciseEditError(
+        "Impossible de retirer un exercice qui contient deja des sets enregistres.",
+      );
+      return;
+    }
+
+    const shouldRemove = window.confirm(
+      `Retirer ${exercise.exerciseName} de cette seance ?`,
+    );
+    if (!shouldRemove) {
+      return;
+    }
+
+    setIsRemovingExerciseEdit(true);
+    setExerciseEditError(null);
+
+    try {
+      if (sessionId && exercise.sessionExerciseId) {
+        await deleteSessionExercise(userId, sessionId, exercise.sessionExerciseId);
+      }
+
+      setExercises((previous) => previous.filter((item) => item.key !== exercise.key));
+
+      if (activeExerciseKey === exercise.key) {
+        setActiveExerciseKey(null);
+        setView("exercise_list");
+        setRestEndsAtMs(null);
+        setDurationCountdown(null);
+      }
+
+      setExerciseEditDraft(null);
+      setEditingExerciseKey(null);
+      setHasAutoFinalizeAttempted(false);
+      setIsSessionCompleted(false);
+      setErrorMessage(null);
+    } catch {
+      setExerciseEditError(
+        "Impossible de retirer cet exercice de la seance pour le moment. Reessaie.",
+      );
+    } finally {
+      setIsRemovingExerciseEdit(false);
     }
   };
 
@@ -1247,9 +1317,14 @@ export function ActiveSessionScreen({
         <ExerciseEditModal
           draft={exerciseEditDraft}
           isSaving={isSavingExerciseEdit}
+          isRemoving={isRemovingExerciseEdit}
           errorMessage={exerciseEditError}
+          canRemove={exerciseEditDraft.loggedSetsCount === 0}
           onChange={updateExerciseEditDraft}
           onClose={closeExerciseEditor}
+          onRemove={() => {
+            void handleRemoveExerciseFromSession();
+          }}
           onSave={() => {
             void handleSaveExerciseEdit();
           }}

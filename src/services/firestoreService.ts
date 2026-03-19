@@ -43,6 +43,8 @@ import type {
 const userDocRef = (uid: string) => doc(db, "users", uid);
 const exercisesCollectionRef = (uid: string) =>
   collection(db, "users", uid, "exercises");
+const exerciseDocRef = (uid: string, exerciseId: string) =>
+  doc(db, "users", uid, "exercises", exerciseId);
 const sharedExercisesCollectionRef = () => collection(db, "sharedExercises");
 const sharedExerciseDocRef = (sharedExerciseId: string) =>
   doc(db, "sharedExercises", sharedExerciseId);
@@ -116,6 +118,28 @@ export interface UpsertUserProfileInput {
 }
 
 export interface CreateExerciseInput {
+  name: string;
+  category: string;
+  trackingMode: TrackingMode;
+  defaultSets: number;
+  defaultReps?: number | null;
+  defaultWeightKg?: number | null;
+  defaultDurationSec?: number | null;
+  defaultRestSec?: number;
+  isActive?: boolean;
+  sourceSharedExerciseId?: string | null;
+  instructions?: string | null;
+  isMachine?: boolean;
+  hasImage?: boolean;
+  hasVideo?: boolean;
+  media?: SharedExerciseMedia | null;
+  source?: string | null;
+  sourceUrl?: string | null;
+  sourceId?: string | null;
+  license?: string | null;
+}
+
+export interface UpdateExerciseInput {
   name: string;
   category: string;
   trackingMode: TrackingMode;
@@ -334,6 +358,61 @@ function getImportedExerciseMetadata(sharedExercise: SharedExerciseDoc): Pick<
   };
 }
 
+function getPlanItemDefaultsPatch(input: UpdateExerciseInput): PartialWithFieldValue<PlanItemDoc> {
+  return {
+    targetSets: Math.max(1, Math.round(input.defaultSets)),
+    targetReps:
+      typeof input.defaultReps === "number" ? Math.max(0, Math.round(input.defaultReps)) : null,
+    targetWeightKg:
+      typeof input.defaultWeightKg === "number" ? Math.max(0, input.defaultWeightKg) : null,
+    targetDurationSec:
+      typeof input.defaultDurationSec === "number"
+        ? Math.max(0, Math.round(input.defaultDurationSec))
+        : null,
+    restSec: Math.max(5, Math.round(input.defaultRestSec ?? 30)),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+async function syncExerciseDefaultsToPlans(
+  uid: string,
+  exerciseId: string,
+  input: UpdateExerciseInput,
+): Promise<void> {
+  const activePlans = await listPlans(uid, 300);
+  const itemPatch = getPlanItemDefaultsPatch(input);
+
+  await Promise.all(
+    activePlans.map(async (plan) => {
+      const matchingItemsSnapshot = await getDocs(
+        query(
+          planItemsCollectionRef(uid, plan.id),
+          where("exerciseId", "==", exerciseId),
+          limit(100),
+        ),
+      );
+
+      if (matchingItemsSnapshot.empty) {
+        return;
+      }
+
+      const batch = writeBatch(db);
+
+      matchingItemsSnapshot.docs.forEach((documentSnapshot) => {
+        batch.set(documentSnapshot.ref, itemPatch, { merge: true });
+      });
+
+      batch.set(
+        planDocRef(uid, plan.id),
+        { updatedAt: serverTimestamp() } satisfies PartialWithFieldValue<PlanDoc>,
+        { merge: true },
+      );
+
+      await batch.commit();
+    }),
+  );
+}
+
 async function hydrateLegacyImportedExercise(
   exercise: ExerciseDoc,
 ): Promise<ExerciseDoc> {
@@ -418,9 +497,49 @@ export async function createExercise(
   return reference.id;
 }
 
+export async function updateExercise(
+  uid: string,
+  exerciseId: string,
+  input: UpdateExerciseInput,
+): Promise<void> {
+  const reference = exerciseDocRef(uid, exerciseId);
+  const snapshot = await getDoc(reference);
+
+  if (!snapshot.exists()) {
+    throw new Error(`Exercice "${exerciseId}" introuvable.`);
+  }
+
+  const payload: PartialWithFieldValue<ExerciseDoc> = {
+    name: input.name,
+    category: input.category,
+    trackingMode: input.trackingMode,
+    defaultSets: input.defaultSets,
+    defaultReps: input.defaultReps ?? null,
+    defaultWeightKg: input.defaultWeightKg ?? null,
+    defaultDurationSec: input.defaultDurationSec ?? null,
+    defaultRestSec: input.defaultRestSec ?? 30,
+    isActive: input.isActive ?? true,
+    sourceSharedExerciseId: input.sourceSharedExerciseId ?? null,
+    instructions: input.instructions ?? null,
+    isMachine: input.isMachine ?? false,
+    hasImage: input.hasImage ?? Boolean(input.media?.imageUrl),
+    hasVideo: input.hasVideo ?? Boolean(input.media?.videoUrl),
+    media: input.media ?? EMPTY_SHARED_MEDIA,
+    source: input.source ?? null,
+    sourceUrl: input.sourceUrl ?? null,
+    sourceId: input.sourceId ?? null,
+    license: input.license ?? null,
+    updatedAt: serverTimestamp(),
+  };
+
+  await setDoc(reference, payload, { merge: true });
+  await syncExerciseDefaultsToPlans(uid, exerciseId, input);
+}
+
 export async function listExercises(
   uid: string,
   maxItems = 200,
+  includeInactive = false,
 ): Promise<Array<ExerciseDoc & { id: string }>> {
   const exercisesQuery = query(
     exercisesCollectionRef(uid),
@@ -435,13 +554,35 @@ export async function listExercises(
       const hydratedExercise = await hydrateLegacyImportedExercise(normalizedExercise);
 
       return {
-      id: document.id,
+        id: document.id,
         ...hydratedExercise,
       };
     }),
   );
 
+  if (includeInactive) {
+    return exercises;
+  }
+
   return exercises.filter((exercise) => exercise.isActive);
+}
+
+export async function deleteExercise(uid: string, exerciseId: string): Promise<void> {
+  const reference = exerciseDocRef(uid, exerciseId);
+  const snapshot = await getDoc(reference);
+
+  if (!snapshot.exists()) {
+    throw new Error(`Exercice "${exerciseId}" introuvable.`);
+  }
+
+  await setDoc(
+    reference,
+    {
+      isActive: false,
+      updatedAt: serverTimestamp(),
+    } satisfies PartialWithFieldValue<ExerciseDoc>,
+    { merge: true },
+  );
 }
 
 export async function listSharedExercises(
@@ -1163,6 +1304,50 @@ export async function addSessionExercise(
 
   const reference = await addDoc(sessionExercisesCollectionRef(uid, sessionId), payload);
   return reference.id;
+}
+
+export async function deleteSessionExercise(
+  uid: string,
+  sessionId: string,
+  sessionExerciseId: string,
+): Promise<void> {
+  const exerciseReference = sessionExerciseDocRef(uid, sessionId, sessionExerciseId);
+  const exerciseSnapshot = await getDoc(exerciseReference);
+
+  if (!exerciseSnapshot.exists()) {
+    throw new Error(`Exercice de seance "${sessionExerciseId}" introuvable.`);
+  }
+
+  const batch = writeBatch(db);
+  const setsSnapshot = await getDocs(setsCollectionRef(uid, sessionId, sessionExerciseId));
+
+  setsSnapshot.docs.forEach((documentSnapshot) => {
+    batch.delete(documentSnapshot.ref);
+  });
+
+  batch.delete(exerciseReference);
+
+  const activeReference = activeSessionDocRef(uid);
+  const activeSnapshot = await getDoc(activeReference);
+  if (activeSnapshot.exists()) {
+    const activeSession = activeSnapshot.data() as ActiveSessionDoc;
+    if (
+      activeSession.sessionId === sessionId
+      && activeSession.activeExerciseId === sessionExerciseId
+    ) {
+      batch.set(
+        activeReference,
+        {
+          activeExerciseId: null,
+          restEndsAt: null,
+          updatedAt: serverTimestamp(),
+        } satisfies PartialWithFieldValue<ActiveSessionDoc>,
+        { merge: true },
+      );
+    }
+  }
+
+  await batch.commit();
 }
 
 export async function updateSessionExerciseConfig(
