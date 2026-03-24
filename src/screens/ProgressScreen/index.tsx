@@ -281,6 +281,21 @@ export function ProgressScreen({
     setPhotoPrivacySuccess(null);
 
     try {
+      if (isPhotoPrivacyEnabled && photoPrivacyCredentialIds.length > 0) {
+        try {
+          await verifyPhotoPrivacyUnlock(photoPrivacyCredentialIds);
+          const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
+          setPhotos(hydratedPhotos);
+          setIsPhotoPrivacyUnlocked(true);
+          setPhotoPrivacySuccess(
+            "Cet appareil peut deja deverrouiller les photos. Aucun nouveau passkey n est necessaire.",
+          );
+          return;
+        } catch {
+          // No compatible passkey available locally: continue with a new registration flow.
+        }
+      }
+
       const registration = await registerPhotoPrivacyCredential(
         userId,
         resolvedDisplayName,

@@ -71,6 +71,44 @@ function readClientData(response: AuthenticatorResponse): {
   }
 }
 
+function normalizeWebAuthnError(error: unknown, action: "create" | "get"): Error {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    const lowerMessage = message.toLowerCase();
+
+    if (error.name === "AbortError" || error.name === "NotAllowedError") {
+      return new Error(
+        action === "create"
+          ? "Creation du passkey annulee ou refusee."
+          : "Deverrouillage annule ou refuse.",
+      );
+    }
+
+    if (error.name === "InvalidStateError") {
+      return new Error("Un passkey compatible existe deja sur cet appareil.");
+    }
+
+    if (
+      error.name === "UnknownError"
+      || (lowerMessage.includes("credential manager") && lowerMessage.includes("unknown error"))
+    ) {
+      return new Error(
+        action === "create"
+          ? "Android n a pas pu creer un nouveau passkey. Essaie d abord Deverrouiller: le passkey est peut etre deja synchronise sur cet appareil."
+          : "Android n a pas pu contacter le gestionnaire d identifiants pour ce passkey.",
+      );
+    }
+
+    return error;
+  }
+
+  return new Error(
+    action === "create"
+      ? "Impossible de creer le passkey sur cet appareil."
+      : "Impossible de deverrouiller avec ce passkey.",
+  );
+}
+
 export async function isPlatformPhotoPrivacyAvailable(): Promise<boolean> {
   ensureWebAuthnAvailable();
 
@@ -92,32 +130,37 @@ export async function registerPhotoPrivacyCredential(
 
   const challenge = createChallenge();
   const expectedChallenge = toBase64Url(challenge);
-  const credential = await navigator.credentials.create({
-    publicKey: {
-      challenge,
-      rp: { name: RP_NAME },
-      user: {
-        id: toUserHandle(userId),
-        name: `${userId}@trackfit.local`,
-        displayName: displayName.trim() || "Membre TrackFit",
+  let credential: Credential | null;
+  try {
+    credential = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: RP_NAME },
+        user: {
+          id: toUserHandle(userId),
+          name: `${userId}@trackfit.local`,
+          displayName: displayName.trim() || "Membre TrackFit",
+        },
+        pubKeyCredParams: [
+          { type: "public-key", alg: -7 },
+          { type: "public-key", alg: -257 },
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: "platform",
+          residentKey: "preferred",
+          userVerification: "required",
+        },
+        timeout: 60_000,
+        attestation: "none",
+        excludeCredentials: existingCredentialIds.map((credentialId) => ({
+          type: "public-key" as const,
+          id: fromBase64Url(credentialId),
+        })),
       },
-      pubKeyCredParams: [
-        { type: "public-key", alg: -7 },
-        { type: "public-key", alg: -257 },
-      ],
-      authenticatorSelection: {
-        authenticatorAttachment: "platform",
-        residentKey: "preferred",
-        userVerification: "required",
-      },
-      timeout: 60_000,
-      attestation: "none",
-      excludeCredentials: existingCredentialIds.map((credentialId) => ({
-        type: "public-key" as const,
-        id: fromBase64Url(credentialId),
-      })),
-    },
-  });
+    });
+  } catch (error) {
+    throw normalizeWebAuthnError(error, "create");
+  }
 
   if (!(credential instanceof PublicKeyCredential)) {
     throw new Error("La creation du verrou biométrique a echoue.");
@@ -143,17 +186,22 @@ export async function verifyPhotoPrivacyUnlock(credentialIds: string[]): Promise
 
   const challenge = createChallenge();
   const expectedChallenge = toBase64Url(challenge);
-  const credential = await navigator.credentials.get({
-    publicKey: {
-      challenge,
-      timeout: 60_000,
-      userVerification: "required",
-      allowCredentials: credentialIds.map((credentialId) => ({
-        type: "public-key" as const,
-        id: fromBase64Url(credentialId),
-      })),
-    },
-  });
+  let credential: Credential | null;
+  try {
+    credential = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        timeout: 60_000,
+        userVerification: "required",
+        allowCredentials: credentialIds.map((credentialId) => ({
+          type: "public-key" as const,
+          id: fromBase64Url(credentialId),
+        })),
+      },
+    });
+  } catch (error) {
+    throw normalizeWebAuthnError(error, "get");
+  }
 
   if (!(credential instanceof PublicKeyCredential)) {
     throw new Error("Le deverrouillage biométrique a echoue.");
