@@ -35,6 +35,8 @@ import type {
   ProgressPhotoDoc,
   SharedExerciseDoc,
   SharedExerciseMedia,
+  SharedPlanDoc,
+  SharedPlanExerciseSnapshot,
   SessionDoc,
   SessionExerciseDoc,
   SessionExerciseStatus,
@@ -50,6 +52,8 @@ const friendRequestsCollectionRef = () => collection(db, "friendRequests");
 const friendRequestDocRef = (requestId: string) => doc(db, "friendRequests", requestId);
 const friendshipsCollectionRef = () => collection(db, "friendships");
 const friendshipDocRef = (friendshipId: string) => doc(db, "friendships", friendshipId);
+const sharedPlansCollectionRef = () => collection(db, "sharedPlans");
+const sharedPlanDocRef = (sharedPlanId: string) => doc(db, "sharedPlans", sharedPlanId);
 const exercisesCollectionRef = (uid: string) =>
   collection(db, "users", uid, "exercises");
 const exerciseDocRef = (uid: string, exerciseId: string) =>
@@ -155,6 +159,27 @@ export interface FriendshipRecord {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   createdFromRequestId: string | null;
+}
+
+export interface SharedPlanRecord {
+  id: string;
+  ownerProfile: PublicUserProfile;
+  sourcePlanId: string;
+  name: string;
+  gymName: string;
+  estimatedDurationMin: number | null;
+  estimatedCaloriesKcal: number | null;
+  estimationSource: EstimationSource | null;
+  exerciseCount: number;
+  exercises: SharedPlanExerciseSnapshot[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+export interface CopySharedPlanResult {
+  planId: string;
+  createdExerciseCount: number;
+  reusedExerciseCount: number;
 }
 
 export interface SendFriendRequestResult {
@@ -454,12 +479,60 @@ function normalizeFriendshipRecord(
   };
 }
 
+function normalizeSharedPlanRecord(
+  documentId: string,
+  sharedPlan: SharedPlanDoc,
+): SharedPlanRecord {
+  return {
+    id: documentId,
+    ownerProfile: {
+      id: sharedPlan.ownerUserId,
+      displayName: sharedPlan.ownerDisplayName,
+      email: "",
+      photoURL: sharedPlan.ownerPhotoURL ?? null,
+    },
+    sourcePlanId: sharedPlan.sourcePlanId,
+    name: sharedPlan.name,
+    gymName: sharedPlan.gymName,
+    estimatedDurationMin: sharedPlan.estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: sharedPlan.estimatedCaloriesKcal ?? null,
+    estimationSource: sharedPlan.estimationSource ?? null,
+    exerciseCount: Math.max(0, sharedPlan.exerciseCount ?? sharedPlan.exercises.length),
+    exercises: Array.isArray(sharedPlan.exercises) ? sharedPlan.exercises : [],
+    createdAt: sharedPlan.createdAt,
+    updatedAt: sharedPlan.updatedAt,
+  };
+}
+
 function buildFriendRequestId(fromUserId: string, toUserId: string): string {
   return `${fromUserId}__${toUserId}`;
 }
 
 function buildFriendshipId(userAId: string, userBId: string): string {
   return [userAId, userBId].sort((left, right) => left.localeCompare(right)).join("__");
+}
+
+function buildSharedPlanId(ownerUserId: string, planId: string): string {
+  return `${ownerUserId}__${planId}`;
+}
+
+function buildFriendPlanExerciseSourceId(
+  ownerUserId: string,
+  sourceExerciseId: string,
+): string {
+  return `friend-plan:${ownerUserId}:${sourceExerciseId}`;
+}
+
+function chunkValues<T>(values: T[], chunkSize: number): T[][] {
+  if (chunkSize <= 0) {
+    return [values];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+  return chunks;
 }
 
 async function getPublicUserProfileOrThrow(uid: string): Promise<PublicUserProfile> {
@@ -961,6 +1034,358 @@ export async function declineFriendRequest(
   );
 }
 
+function resolveSharedPlanTrackingMode(
+  item: PlanItemDoc,
+  linkedExercise?: (ExerciseDoc & { id: string }) | null,
+): TrackingMode {
+  if (linkedExercise?.trackingMode) {
+    return linkedExercise.trackingMode;
+  }
+
+  if ((item.targetDurationSec ?? 0) > 0 && (item.targetReps ?? 0) === 0) {
+    return "duration_only";
+  }
+
+  if ((item.targetWeightKg ?? 0) > 0) {
+    return "weight_reps";
+  }
+
+  return "reps_only";
+}
+
+function buildSharedPlanExerciseSnapshot(
+  item: PlanItemDoc & { id: string },
+  linkedExercise: (ExerciseDoc & { id: string }) | null,
+  index: number,
+): SharedPlanExerciseSnapshot {
+  const normalizedExercise = linkedExercise ? normalizeExerciseDoc(linkedExercise) : null;
+  const trackingMode = resolveSharedPlanTrackingMode(item, linkedExercise);
+
+  return {
+    sourceExerciseId:
+      linkedExercise?.id.trim() || item.exerciseId.trim() || `shared-plan-exercise-${index + 1}`,
+    exerciseName:
+      normalizedExercise?.name?.trim() || `Exercice ${index + 1}`,
+    category: normalizedExercise?.category?.trim() || "personnalise",
+    trackingMode,
+    defaultSets: Math.max(1, Math.round(item.targetSets)),
+    defaultReps:
+      typeof item.targetReps === "number" ? Math.max(0, Math.round(item.targetReps)) : null,
+    defaultWeightKg:
+      typeof item.targetWeightKg === "number" ? Math.max(0, item.targetWeightKg) : null,
+    defaultDurationSec:
+      typeof item.targetDurationSec === "number"
+        ? Math.max(0, Math.round(item.targetDurationSec))
+        : null,
+    defaultRestSec: Math.max(5, Math.round(item.restSec)),
+    sourceSharedExerciseId: normalizedExercise?.sourceSharedExerciseId ?? null,
+    instructions: normalizedExercise?.instructions ?? null,
+    isMachine: normalizedExercise?.isMachine ?? false,
+    hasImage: normalizedExercise?.hasImage ?? false,
+    hasVideo: normalizedExercise?.hasVideo ?? false,
+    media: normalizedExercise?.media ?? EMPTY_SHARED_MEDIA,
+    source: normalizedExercise?.source ?? null,
+    sourceUrl: normalizedExercise?.sourceUrl ?? null,
+    sourceId: normalizedExercise?.sourceId ?? null,
+    license: normalizedExercise?.license ?? null,
+  };
+}
+
+export async function publishPlanForFriends(
+  uid: string,
+  planId: string,
+): Promise<string> {
+  const sharedPlanId = buildSharedPlanId(uid, planId);
+  const sharedPlanReference = sharedPlanDocRef(sharedPlanId);
+  const [ownerProfile, planSnapshot, planItems, exercises, existingSharedPlanSnapshot] =
+    await Promise.all([
+      getPublicUserProfileOrThrow(uid),
+      getDoc(planDocRef(uid, planId)),
+      listPlanItems(uid, planId, 120),
+      listExercises(uid, 500, true),
+      getDoc(sharedPlanReference),
+    ]);
+
+  if (!planSnapshot.exists()) {
+    throw new Error("Seance introuvable.");
+  }
+
+  const plan = planSnapshot.data() as PlanDoc;
+  if (!plan.isActive) {
+    throw new Error("Cette seance est inactive et ne peut pas etre partagee.");
+  }
+  if (planItems.length === 0) {
+    throw new Error("Ajoute au moins un exercice avant de partager cette seance.");
+  }
+
+  const exerciseById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
+  const sharedExercises = planItems.map((item, index) =>
+    buildSharedPlanExerciseSnapshot(item, exerciseById.get(item.exerciseId) ?? null, index),
+  );
+  const existingSharedPlan = existingSharedPlanSnapshot.exists()
+    ? (existingSharedPlanSnapshot.data() as SharedPlanDoc)
+    : null;
+
+  await setDoc(sharedPlanReference, {
+    ownerUserId: uid,
+    ownerDisplayName: ownerProfile.displayName,
+    ownerPhotoURL: ownerProfile.photoURL,
+    sourcePlanId: planId,
+    name: plan.name.trim() || "Seance TrackFit",
+    gymName: plan.gymName.trim() || "Salle",
+    estimatedDurationMin: plan.estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: plan.estimatedCaloriesKcal ?? null,
+    estimationSource: plan.estimationSource ?? null,
+    exerciseCount: sharedExercises.length,
+    exercises: sharedExercises,
+    createdAt: existingSharedPlan?.createdAt ?? serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  } satisfies WithFieldValue<SharedPlanDoc>);
+
+  return sharedPlanId;
+}
+
+export async function unpublishPlanForFriends(
+  uid: string,
+  planId: string,
+): Promise<void> {
+  const sharedPlanReference = sharedPlanDocRef(buildSharedPlanId(uid, planId));
+  const snapshot = await getDoc(sharedPlanReference);
+
+  if (!snapshot.exists()) {
+    return;
+  }
+
+  const sharedPlan = snapshot.data() as SharedPlanDoc;
+  if (sharedPlan.ownerUserId !== uid) {
+    throw new Error("Action non autorisee.");
+  }
+
+  await deleteDoc(sharedPlanReference);
+}
+
+export async function listOwnSharedPlans(
+  uid: string,
+  maxItems = 100,
+): Promise<SharedPlanRecord[]> {
+  const snapshot = await getDocs(
+    query(sharedPlansCollectionRef(), where("ownerUserId", "==", uid), limit(maxItems)),
+  );
+
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizeSharedPlanRecord(documentSnapshot.id, documentSnapshot.data() as SharedPlanDoc),
+    )
+    .sort((left, right) => right.updatedAt.toMillis() - left.updatedAt.toMillis());
+}
+
+export async function listFriendsSharedPlans(
+  uid: string,
+  maxItems = 24,
+): Promise<SharedPlanRecord[]> {
+  const friendships = await listFriendships(uid, 80);
+  const counterpartProfiles = new Map<string, PublicUserProfile>();
+
+  friendships.forEach((friendship) => {
+    const counterpart = friendship.members.find((member) => member.uid !== uid);
+    if (!counterpart) {
+      return;
+    }
+
+    counterpartProfiles.set(counterpart.uid, {
+      id: counterpart.uid,
+      displayName: counterpart.displayName,
+      email: counterpart.email,
+      photoURL: counterpart.photoURL ?? null,
+    });
+  });
+
+  const friendIds = [...counterpartProfiles.keys()];
+  if (friendIds.length === 0) {
+    return [];
+  }
+
+  const snapshots = await Promise.all(
+    chunkValues(friendIds, 10).map((friendIdsChunk) =>
+      getDocs(
+        query(
+          sharedPlansCollectionRef(),
+          where("ownerUserId", "in", friendIdsChunk),
+          limit(maxItems),
+        ),
+      ),
+    ),
+  );
+
+  const recordsById = new Map<string, SharedPlanRecord>();
+
+  snapshots.forEach((snapshot) => {
+    snapshot.docs.forEach((documentSnapshot) => {
+      const normalizedRecord = normalizeSharedPlanRecord(
+        documentSnapshot.id,
+        documentSnapshot.data() as SharedPlanDoc,
+      );
+      const counterpartProfile = counterpartProfiles.get(normalizedRecord.ownerProfile.id);
+
+      recordsById.set(documentSnapshot.id, {
+        ...normalizedRecord,
+        ownerProfile: counterpartProfile ?? normalizedRecord.ownerProfile,
+      });
+    });
+  });
+
+  return [...recordsById.values()]
+    .sort((left, right) => right.updatedAt.toMillis() - left.updatedAt.toMillis())
+    .slice(0, maxItems);
+}
+
+export async function copySharedPlanToUser(
+  uid: string,
+  sharedPlanId: string,
+): Promise<CopySharedPlanResult> {
+  const sharedPlanSnapshot = await getDoc(sharedPlanDocRef(sharedPlanId));
+
+  if (!sharedPlanSnapshot.exists()) {
+    throw new Error("Seance partagee introuvable.");
+  }
+
+  const sharedPlan = sharedPlanSnapshot.data() as SharedPlanDoc;
+  if (!Array.isArray(sharedPlan.exercises) || sharedPlan.exercises.length === 0) {
+    throw new Error("Cette seance partagee ne contient aucun exercice exploitable.");
+  }
+
+  const localExercises = await listExercises(uid, 500, true);
+  const localExerciseBySharedSourceId = new Map<string, { id: string; isActive: boolean }>();
+  const localExerciseByFriendSourceId = new Map<string, string>();
+
+  localExercises.forEach((exercise) => {
+    if (exercise.sourceSharedExerciseId) {
+      localExerciseBySharedSourceId.set(exercise.sourceSharedExerciseId, {
+        id: exercise.id,
+        isActive: exercise.isActive,
+      });
+    }
+    if (exercise.sourceId?.startsWith("friend-plan:")) {
+      localExerciseByFriendSourceId.set(exercise.sourceId, exercise.id);
+    }
+  });
+
+  let createdExerciseCount = 0;
+  let reusedExerciseCount = 0;
+
+  const items = [];
+
+  for (const [index, exercise] of sharedPlan.exercises.entries()) {
+    let localExerciseId: string;
+
+    if (exercise.sourceSharedExerciseId) {
+      const existingExercise = localExerciseBySharedSourceId.get(exercise.sourceSharedExerciseId);
+
+      if (existingExercise?.isActive) {
+        localExerciseId = existingExercise.id;
+        reusedExerciseCount += 1;
+      } else {
+        localExerciseId = await importSharedExerciseToUser(uid, exercise.sourceSharedExerciseId);
+        localExerciseBySharedSourceId.set(exercise.sourceSharedExerciseId, {
+          id: localExerciseId,
+          isActive: true,
+        });
+        if (existingExercise) {
+          reusedExerciseCount += 1;
+        } else {
+          createdExerciseCount += 1;
+        }
+      }
+    } else {
+      const friendExerciseSourceId = buildFriendPlanExerciseSourceId(
+        sharedPlan.ownerUserId,
+        exercise.sourceExerciseId,
+      );
+      const existingExerciseId = localExerciseByFriendSourceId.get(friendExerciseSourceId);
+
+      if (existingExerciseId) {
+        localExerciseId = existingExerciseId;
+        reusedExerciseCount += 1;
+
+        await setDoc(
+          exerciseDocRef(uid, localExerciseId),
+          {
+            name: exercise.exerciseName,
+            category: exercise.category,
+            trackingMode: exercise.trackingMode,
+            defaultSets: exercise.defaultSets,
+            defaultReps: exercise.defaultReps ?? null,
+            defaultWeightKg: exercise.defaultWeightKg ?? null,
+            defaultDurationSec: exercise.defaultDurationSec ?? null,
+            defaultRestSec: exercise.defaultRestSec,
+            isActive: true,
+            instructions: exercise.instructions ?? null,
+            isMachine: exercise.isMachine,
+            hasImage: exercise.hasImage,
+            hasVideo: exercise.hasVideo,
+            media: exercise.media ?? EMPTY_SHARED_MEDIA,
+            source: "TrackFit ami",
+            sourceUrl: exercise.sourceUrl ?? null,
+            sourceId: friendExerciseSourceId,
+            license: exercise.license ?? null,
+            updatedAt: serverTimestamp(),
+          } satisfies PartialWithFieldValue<ExerciseDoc>,
+          { merge: true },
+        );
+      } else {
+        localExerciseId = await createExercise(uid, {
+          name: exercise.exerciseName,
+          category: exercise.category,
+          trackingMode: exercise.trackingMode,
+          defaultSets: exercise.defaultSets,
+          defaultReps: exercise.defaultReps ?? null,
+          defaultWeightKg: exercise.defaultWeightKg ?? null,
+          defaultDurationSec: exercise.defaultDurationSec ?? null,
+          defaultRestSec: exercise.defaultRestSec,
+          isActive: true,
+          instructions: exercise.instructions ?? null,
+          isMachine: exercise.isMachine,
+          hasImage: exercise.hasImage,
+          hasVideo: exercise.hasVideo,
+          media: exercise.media ?? EMPTY_SHARED_MEDIA,
+          source: "TrackFit ami",
+          sourceUrl: exercise.sourceUrl ?? null,
+          sourceId: friendExerciseSourceId,
+          license: exercise.license ?? null,
+        });
+        localExerciseByFriendSourceId.set(friendExerciseSourceId, localExerciseId);
+        createdExerciseCount += 1;
+      }
+    }
+
+    items.push({
+      order: index + 1,
+      exerciseId: localExerciseId,
+      targetSets: exercise.defaultSets,
+      targetReps: exercise.defaultReps ?? null,
+      targetWeightKg: exercise.defaultWeightKg ?? null,
+      targetDurationSec: exercise.defaultDurationSec ?? null,
+      restSec: exercise.defaultRestSec,
+      notes: "",
+    } satisfies CreatePlanItemInput);
+  }
+
+  const planId = await createPlanWithItems(uid, {
+    name: `${sharedPlan.name} - ${sharedPlan.ownerDisplayName}`,
+    gymName: sharedPlan.gymName,
+    estimatedDurationMin: sharedPlan.estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: sharedPlan.estimatedCaloriesKcal ?? null,
+    estimationSource: sharedPlan.estimationSource ?? null,
+    items,
+  });
+
+  return {
+    planId,
+    createdExerciseCount,
+    reusedExerciseCount,
+  };
+}
+
 export async function createExercise(
   uid: string,
   input: CreateExerciseInput,
@@ -1399,6 +1824,11 @@ export async function updatePlanWithItems(
   });
 
   await batch.commit();
+
+  const sharedPlanSnapshot = await getDoc(sharedPlanDocRef(buildSharedPlanId(uid, planId)));
+  if (sharedPlanSnapshot.exists()) {
+    await publishPlanForFriends(uid, planId);
+  }
 }
 
 export async function deletePlan(uid: string, planId: string): Promise<void> {
@@ -1407,6 +1837,7 @@ export async function deletePlan(uid: string, planId: string): Promise<void> {
     updatedAt: serverTimestamp(),
   };
   await setDoc(planDocRef(uid, planId), planPatch, { merge: true });
+  await unpublishPlanForFriends(uid, planId);
 }
 
 export async function deleteSession(uid: string, sessionId: string): Promise<void> {

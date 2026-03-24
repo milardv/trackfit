@@ -71,6 +71,42 @@ export interface FriendshipDoc extends TimestampedDoc {
   createdFromRequestId: string | null;
 }
 
+export interface SharedPlanExerciseSnapshot {
+  sourceExerciseId: string;
+  exerciseName: string;
+  category: string;
+  trackingMode: TrackingMode;
+  defaultSets: number;
+  defaultReps: number | null;
+  defaultWeightKg: number | null;
+  defaultDurationSec: number | null;
+  defaultRestSec: number;
+  sourceSharedExerciseId: string | null;
+  instructions: string | null;
+  isMachine: boolean;
+  hasImage: boolean;
+  hasVideo: boolean;
+  media: SharedExerciseMedia | null;
+  source: string | null;
+  sourceUrl: string | null;
+  sourceId: string | null;
+  license: string | null;
+}
+
+export interface SharedPlanDoc extends TimestampedDoc {
+  ownerUserId: string;
+  ownerDisplayName: string;
+  ownerPhotoURL: string | null;
+  sourcePlanId: string;
+  name: string;
+  gymName: string;
+  estimatedDurationMin: number | null;
+  estimatedCaloriesKcal: number | null;
+  estimationSource: EstimationSource | null;
+  exerciseCount: number;
+  exercises: SharedPlanExerciseSnapshot[];
+}
+
 export interface ExerciseDoc extends TimestampedDoc {
   name: string;
   category: string;

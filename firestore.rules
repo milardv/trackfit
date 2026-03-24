@@ -14,6 +14,27 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid == fromUserId || request.auth.uid == toUserId);
     }
 
+    function documentIdIncludesCurrentUser(documentId) {
+      return isSignedIn()
+        && (
+          documentId.matches("^" + request.auth.uid + "__.+$")
+          || documentId.matches("^.+__" + request.auth.uid + "$")
+        );
+    }
+
+    function documentIdStartsWithCurrentUser(documentId) {
+      return isSignedIn()
+        && documentId.matches("^" + request.auth.uid + "__.+$");
+    }
+
+    function isFriend(userAId, userBId) {
+      return isSignedIn()
+        && (
+          exists(/databases/$(database)/documents/friendships/$(userAId + "__" + userBId))
+          || exists(/databases/$(database)/documents/friendships/$(userBId + "__" + userAId))
+        );
+    }
+
     // Public user profile at the root document, searchable by signed-in users.
     match /users/{uid} {
       allow read: if isSignedIn();
@@ -26,7 +47,13 @@ service cloud.firestore {
     }
 
     match /friendRequests/{requestId} {
-      allow read: if isFriendRequestParticipant(resource.data.fromUserId, resource.data.toUserId);
+      allow read: if (
+        resource != null
+        && isFriendRequestParticipant(resource.data.fromUserId, resource.data.toUserId)
+      ) || (
+        resource == null
+        && documentIdIncludesCurrentUser(requestId)
+      );
 
       allow create: if isSignedIn()
         && request.resource.data.fromUserId == request.auth.uid
@@ -53,7 +80,14 @@ service cloud.firestore {
     }
 
     match /friendships/{friendshipId} {
-      allow read: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow read: if (
+        resource != null
+        && isSignedIn()
+        && request.auth.uid in resource.data.memberIds
+      ) || (
+        resource == null
+        && documentIdIncludesCurrentUser(friendshipId)
+      );
 
       allow create: if isSignedIn()
         && request.auth.uid in request.resource.data.memberIds
@@ -68,13 +102,41 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /sharedPlans/{sharedPlanId} {
+      allow read: if (
+        resource != null
+        && isSignedIn()
+        && (
+          resource.data.ownerUserId == request.auth.uid
+          || isFriend(resource.data.ownerUserId, request.auth.uid)
+        )
+      ) || (
+        resource == null
+        && documentIdStartsWithCurrentUser(sharedPlanId)
+      );
+
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUserId == request.auth.uid
+        && request.resource.data.sourcePlanId is string
+        && request.resource.data.exerciseCount is int
+        && request.resource.data.exerciseCount > 0;
+
+      allow update: if resource != null
+        && resource.data.ownerUserId == request.auth.uid
+        && request.resource.data.ownerUserId == request.auth.uid
+        && request.resource.data.sourcePlanId == resource.data.sourcePlanId;
+
+      allow delete: if resource != null
+        && resource.data.ownerUserId == request.auth.uid;
+    }
+
     // Shared exercise catalog maintained out-of-band (admin/sync job).
     match /sharedExercises/{exerciseId} {
       allow read: if isSignedIn();
       allow write: if false;
     }
 
-    // Deny anything outside /users/{uid}/...
+    // Deny anything not matched explicitly above.
     match /{document=**} {
       allow read, write: if false;
     }

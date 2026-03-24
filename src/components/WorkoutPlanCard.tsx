@@ -13,6 +13,10 @@ interface WorkoutPlanCardProps {
   onCardKeyDown?: (event: ReactKeyboardEvent<HTMLElement>) => void;
   onStart?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   startLabel?: string;
+  onShare?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  shareLabel?: string;
+  isShareActive?: boolean;
+  isShareDisabled?: boolean;
 }
 
 function getGymIcon(gymName: string): "location_on" | "home_pin" {
@@ -33,6 +37,10 @@ export function WorkoutPlanCard({
   onCardKeyDown,
   onStart,
   startLabel = "DEMARRER",
+  onShare,
+  shareLabel = "RENDRE PUBLIQUE",
+  isShareActive = false,
+  isShareDisabled = false,
 }: WorkoutPlanCardProps) {
   const visibleExercises = exerciseNames.slice(0, 3);
   const hiddenCount = Math.max(0, exerciseCount - visibleExercises.length);
@@ -92,15 +100,35 @@ export function WorkoutPlanCard({
         </p>
       ) : null}
 
-      <button
-        type="button"
-        onClick={onStart}
-        disabled={!canStart}
-        className="relative z-10 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary font-extrabold text-background-dark shadow-lg shadow-primary/10 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <span className="material-symbols-outlined">play_arrow</span>
-        {startLabel}
-      </button>
+      <div className="relative z-10 flex gap-3">
+        {onShare ? (
+          <button
+            type="button"
+            onClick={onShare}
+            disabled={isShareDisabled}
+            className={`flex h-14 items-center justify-center gap-2 rounded-xl border px-4 font-extrabold transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 ${
+              isShareActive
+                ? "border-primary/25 bg-primary/12 text-primary hover:bg-primary/18"
+                : "border-white/10 bg-black/20 text-slate-100 hover:bg-white/10"
+            }`}
+          >
+            <span className="material-symbols-outlined">
+              {isShareActive ? "public" : "share"}
+            </span>
+            {shareLabel}
+          </button>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={onStart}
+          disabled={!canStart}
+          className="flex h-14 flex-1 items-center justify-center gap-2 rounded-xl bg-primary font-extrabold text-background-dark shadow-lg shadow-primary/10 transition-all hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className="material-symbols-outlined">play_arrow</span>
+          {startLabel}
+        </button>
+      </div>
     </article>
   );
 }

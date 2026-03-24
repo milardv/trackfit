@@ -54,4 +54,5 @@ export interface WorkoutPlanToStart {
 export interface PlanCard extends WorkoutPlanToStart {
   exerciseCount: number;
   exerciseNames: string[];
+  isSharedWithFriends?: boolean;
 }
