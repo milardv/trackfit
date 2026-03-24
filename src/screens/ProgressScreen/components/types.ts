@@ -74,6 +74,7 @@ export interface ProgressPhotosSectionProps {
   uploadError: string | null;
   uploadSuccess: string | null;
   onEnableProtection: () => void;
+  onAddCurrentDevice: () => void;
   onUnlockPhotos: () => void;
   onLockPhotos: () => void;
   onDisableProtection: () => void;

@@ -2,6 +2,14 @@ const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODER = new TextDecoder();
 const RP_NAME = "TrackFit";
 
+function getRpId(): string {
+  if (typeof window === "undefined") {
+    return "localhost";
+  }
+
+  return window.location.hostname || "localhost";
+}
+
 function toBase64Url(source: ArrayBuffer | Uint8Array): string {
   const bytes = source instanceof Uint8Array ? source : new Uint8Array(source);
   let binary = "";
@@ -135,10 +143,10 @@ export async function registerPhotoPrivacyCredential(
     credential = await navigator.credentials.create({
       publicKey: {
         challenge,
-        rp: { name: RP_NAME },
+        rp: { name: RP_NAME, id: getRpId() },
         user: {
           id: toUserHandle(userId),
-          name: `${userId}@trackfit.local`,
+          name: userId,
           displayName: displayName.trim() || "Membre TrackFit",
         },
         pubKeyCredParams: [
@@ -147,7 +155,7 @@ export async function registerPhotoPrivacyCredential(
         ],
         authenticatorSelection: {
           authenticatorAttachment: "platform",
-          residentKey: "preferred",
+          residentKey: "required",
           userVerification: "required",
         },
         timeout: 60_000,

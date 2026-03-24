@@ -271,6 +271,29 @@ export function ProgressScreen({
     }
   };
 
+  const registerPhotoPrivacyOnCurrentDevice = async () => {
+    const registration = await registerPhotoPrivacyCredential(
+      userId,
+      resolvedDisplayName,
+      photoPrivacyCredentialIds,
+    );
+    const settings = await enablePhotoPrivacyForCredential(
+      userId,
+      registration.credentialId,
+    );
+    const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
+
+    setPhotos(hydratedPhotos);
+    setIsPhotoPrivacyEnabled(settings.isEnabled);
+    setPhotoPrivacyCredentialIds(settings.credentialIds);
+    setIsPhotoPrivacyUnlocked(true);
+    setPhotoPrivacySuccess(
+      settings.credentialIds.length > 1
+        ? `Appareil ${registration.label} ajoute pour deverrouiller les photos.`
+        : `Verrouillage active sur ${registration.label}.`,
+    );
+  };
+
   const handleEnablePhotoPrivacy = async () => {
     if (isPhotoPrivacyBusy) {
       return;
@@ -281,44 +304,34 @@ export function ProgressScreen({
     setPhotoPrivacySuccess(null);
 
     try {
-      if (isPhotoPrivacyEnabled && photoPrivacyCredentialIds.length > 0) {
-        try {
-          await verifyPhotoPrivacyUnlock(photoPrivacyCredentialIds);
-          const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
-          setPhotos(hydratedPhotos);
-          setIsPhotoPrivacyUnlocked(true);
-          setPhotoPrivacySuccess(
-            "Cet appareil peut deja deverrouiller les photos. Aucun nouveau passkey n est necessaire.",
-          );
-          return;
-        } catch {
-          // No compatible passkey available locally: continue with a new registration flow.
-        }
-      }
-
-      const registration = await registerPhotoPrivacyCredential(
-        userId,
-        resolvedDisplayName,
-        photoPrivacyCredentialIds,
-      );
-      const settings = await enablePhotoPrivacyForCredential(
-        userId,
-        registration.credentialId,
-      );
-
-      setIsPhotoPrivacyEnabled(settings.isEnabled);
-      setPhotoPrivacyCredentialIds(settings.credentialIds);
-      setIsPhotoPrivacyUnlocked(true);
-      setPhotoPrivacySuccess(
-        settings.credentialIds.length > 1
-          ? `Appareil ${registration.label} ajoute pour deverrouiller les photos.`
-          : `Verrouillage active sur ${registration.label}.`,
-      );
+      await registerPhotoPrivacyOnCurrentDevice();
     } catch (error) {
       const message =
         error instanceof Error && error.message
           ? error.message
           : "Impossible d activer le verrouillage des photos.";
+      setPhotoPrivacyError(message);
+    } finally {
+      setIsPhotoPrivacyBusy(false);
+    }
+  };
+
+  const handleAddPhotoPrivacyDevice = async () => {
+    if (isPhotoPrivacyBusy) {
+      return;
+    }
+
+    setIsPhotoPrivacyBusy(true);
+    setPhotoPrivacyError(null);
+    setPhotoPrivacySuccess(null);
+
+    try {
+      await registerPhotoPrivacyOnCurrentDevice();
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Impossible d ajouter cet appareil pour deverrouiller les photos.";
       setPhotoPrivacyError(message);
     } finally {
       setIsPhotoPrivacyBusy(false);
@@ -696,6 +709,9 @@ export function ProgressScreen({
                   uploadSuccess={photoUploadSuccess}
                   onEnableProtection={() => {
                     void handleEnablePhotoPrivacy();
+                  }}
+                  onAddCurrentDevice={() => {
+                    void handleAddPhotoPrivacyDevice();
                   }}
                   onUnlockPhotos={() => {
                     void handleUnlockPhotos();

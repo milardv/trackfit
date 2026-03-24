@@ -26,6 +26,7 @@ export function ProgressPhotosSection({
   uploadError,
   uploadSuccess,
   onEnableProtection,
+  onAddCurrentDevice,
   onUnlockPhotos,
   onLockPhotos,
   onDisableProtection,
@@ -199,7 +200,7 @@ export function ProgressPhotosSection({
                 {photoPrivacyEnabled ? (
                   <button
                     type="button"
-                    onClick={isPhotoPrivacyUnlocked ? onLockPhotos : onEnableProtection}
+                    onClick={isPhotoPrivacyUnlocked ? onLockPhotos : onAddCurrentDevice}
                     disabled={isPhotoPrivacyBusy || (!isPhotoPrivacyUnlocked && !isPhotoPrivacySupported)}
                     className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-bold text-white transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
                   >
