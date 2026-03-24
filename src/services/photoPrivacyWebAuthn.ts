@@ -79,6 +79,41 @@ function readClientData(response: AuthenticatorResponse): {
   }
 }
 
+function readUserHandle(response: AuthenticatorResponse): string | null {
+  if (!("userHandle" in response) || !(response.userHandle instanceof ArrayBuffer)) {
+    return null;
+  }
+
+  try {
+    return TEXT_DECODER.decode(response.userHandle);
+  } catch {
+    return null;
+  }
+}
+
+async function requestPhotoPrivacyCredential(
+  challenge: ArrayBuffer,
+  credentialIds: string[],
+): Promise<Credential | null> {
+  const publicKey: PublicKeyCredentialRequestOptions & {
+    hints?: string[];
+  } = {
+    challenge,
+    rpId: getRpId(),
+    timeout: 60_000,
+    userVerification: "required",
+    hints: ["client-device"],
+    allowCredentials: credentialIds.map((credentialId) => ({
+      type: "public-key" as const,
+      id: fromBase64Url(credentialId),
+    })),
+  };
+
+  return navigator.credentials.get({
+    publicKey,
+  });
+}
+
 function normalizeWebAuthnError(error: unknown, action: "create" | "get"): Error {
   if (error instanceof Error) {
     const message = error.message.trim();
@@ -142,35 +177,39 @@ export async function registerPhotoPrivacyCredential(
   const challenge = createChallenge();
   const expectedChallenge = toBase64Url(challenge);
   const shouldExcludeExistingCredentials = options?.excludeExistingCredentials !== false;
+  const publicKey: PublicKeyCredentialCreationOptions & {
+    hints?: string[];
+  } = {
+    challenge,
+    rp: { name: RP_NAME, id: getRpId() },
+    user: {
+      id: toUserHandle(userId),
+      name: userId,
+      displayName: displayName.trim() || "Membre TrackFit",
+    },
+    pubKeyCredParams: [
+      { type: "public-key", alg: -7 },
+      { type: "public-key", alg: -257 },
+    ],
+    authenticatorSelection: {
+      authenticatorAttachment: "platform",
+      residentKey: "required",
+      userVerification: "required",
+    },
+    hints: ["client-device"],
+    timeout: 60_000,
+    attestation: "none",
+    excludeCredentials: shouldExcludeExistingCredentials
+      ? existingCredentialIds.map((credentialId) => ({
+          type: "public-key" as const,
+          id: fromBase64Url(credentialId),
+        }))
+      : [],
+  };
   let credential: Credential | null;
   try {
     credential = await navigator.credentials.create({
-      publicKey: {
-        challenge,
-        rp: { name: RP_NAME, id: getRpId() },
-        user: {
-          id: toUserHandle(userId),
-          name: userId,
-          displayName: displayName.trim() || "Membre TrackFit",
-        },
-        pubKeyCredParams: [
-          { type: "public-key", alg: -7 },
-          { type: "public-key", alg: -257 },
-        ],
-        authenticatorSelection: {
-          authenticatorAttachment: "platform",
-          residentKey: "required",
-          userVerification: "required",
-        },
-        timeout: 60_000,
-        attestation: "none",
-        excludeCredentials: shouldExcludeExistingCredentials
-          ? existingCredentialIds.map((credentialId) => ({
-              type: "public-key" as const,
-              id: fromBase64Url(credentialId),
-            }))
-          : [],
-      },
+      publicKey,
     });
   } catch (error) {
     throw normalizeWebAuthnError(error, "create");
@@ -191,7 +230,10 @@ export async function registerPhotoPrivacyCredential(
   };
 }
 
-export async function verifyPhotoPrivacyUnlock(credentialIds: string[]): Promise<string> {
+export async function verifyPhotoPrivacyUnlock(
+  credentialIds: string[],
+  userId: string,
+): Promise<string> {
   ensureWebAuthnAvailable();
 
   if (credentialIds.length === 0) {
@@ -202,17 +244,11 @@ export async function verifyPhotoPrivacyUnlock(credentialIds: string[]): Promise
   const expectedChallenge = toBase64Url(challenge);
   let credential: Credential | null;
   try {
-    credential = await navigator.credentials.get({
-      publicKey: {
-        challenge,
-        timeout: 60_000,
-        userVerification: "required",
-        allowCredentials: credentialIds.map((credentialId) => ({
-          type: "public-key" as const,
-          id: fromBase64Url(credentialId),
-        })),
-      },
-    });
+    try {
+      credential = await requestPhotoPrivacyCredential(challenge, credentialIds);
+    } catch {
+      credential = await requestPhotoPrivacyCredential(challenge, []);
+    }
   } catch (error) {
     throw normalizeWebAuthnError(error, "get");
   }
@@ -226,5 +262,12 @@ export async function verifyPhotoPrivacyUnlock(credentialIds: string[]): Promise
     throw new Error("Le deverrouillage biométrique n a pas pu etre valide.");
   }
 
-  return toBase64Url(credential.rawId);
+  const credentialId = toBase64Url(credential.rawId);
+  const userHandle = readUserHandle(credential.response);
+
+  if (!credentialIds.includes(credentialId) && userHandle !== userId) {
+    throw new Error("Le passkey selectionne ne correspond pas a ce compte TrackFit.");
+  }
+
+  return credentialId;
 }

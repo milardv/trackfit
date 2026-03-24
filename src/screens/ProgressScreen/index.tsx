@@ -355,7 +355,11 @@ export function ProgressScreen({
     setPhotoPrivacySuccess(null);
 
     try {
-      await verifyPhotoPrivacyUnlock(photoPrivacyCredentialIds);
+      const credentialId = await verifyPhotoPrivacyUnlock(photoPrivacyCredentialIds, userId);
+      if (!photoPrivacyCredentialIds.includes(credentialId)) {
+        const settings = await enablePhotoPrivacyForCredential(userId, credentialId);
+        setPhotoPrivacyCredentialIds(settings.credentialIds);
+      }
       const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
       setPhotos(hydratedPhotos);
       setIsPhotoPrivacyUnlocked(true);
