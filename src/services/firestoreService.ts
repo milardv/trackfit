@@ -26,6 +26,10 @@ import type {
   ExerciseDoc,
   ExerciseStatsDoc,
   ExerciseTimelinePointDoc,
+  FriendRequestDoc,
+  FriendRequestStatus,
+  FriendshipDoc,
+  FriendshipMemberSnapshot,
   PlanDoc,
   PlanItemDoc,
   ProgressPhotoDoc,
@@ -41,6 +45,11 @@ import type {
 } from "../types/firestore.ts";
 
 const userDocRef = (uid: string) => doc(db, "users", uid);
+const usersCollectionRef = () => collection(db, "users");
+const friendRequestsCollectionRef = () => collection(db, "friendRequests");
+const friendRequestDocRef = (requestId: string) => doc(db, "friendRequests", requestId);
+const friendshipsCollectionRef = () => collection(db, "friendships");
+const friendshipDocRef = (friendshipId: string) => doc(db, "friendships", friendshipId);
 const exercisesCollectionRef = (uid: string) =>
   collection(db, "users", uid, "exercises");
 const exerciseDocRef = (uid: string, exerciseId: string) =>
@@ -115,6 +124,43 @@ export interface UpsertUserProfileInput {
   displayName: string;
   email: string;
   defaultRestSec?: number;
+  photoURL?: string | null;
+}
+
+export interface PublicUserProfile {
+  id: string;
+  displayName: string;
+  email: string;
+  photoURL: string | null;
+}
+
+export interface FriendRequestRecord {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  fromProfile: PublicUserProfile;
+  toProfile: PublicUserProfile;
+  status: FriendRequestStatus;
+  note: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  respondedAt: Timestamp | null;
+  friendshipId: string | null;
+}
+
+export interface FriendshipRecord {
+  id: string;
+  memberIds: string[];
+  members: FriendshipMemberSnapshot[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdFromRequestId: string | null;
+}
+
+export interface SendFriendRequestResult {
+  status: "sent" | "accepted_existing";
+  requestId: string;
+  friendshipId: string | null;
 }
 
 export interface CreateExerciseInput {
@@ -308,6 +354,123 @@ const EMPTY_SHARED_MEDIA: SharedExerciseMedia = {
   videoUrl: null,
 };
 
+function normalizeSearchableValue(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function addSearchPrefixes(target: Set<string>, value: string, maxLength = 32): void {
+  const normalizedValue = normalizeSearchableValue(value);
+  if (!normalizedValue) {
+    return;
+  }
+
+  const upperBound = Math.min(normalizedValue.length, maxLength);
+  for (let index = 1; index <= upperBound; index += 1) {
+    target.add(normalizedValue.slice(0, index));
+  }
+}
+
+function buildUserSearchKeywords(displayName: string, email: string): string[] {
+  const keywords = new Set<string>();
+  const normalizedDisplayName = normalizeSearchableValue(displayName);
+  const normalizedEmail = normalizeSearchableValue(email);
+  const compactDisplayName = normalizedDisplayName.replace(/\s+/g, "");
+  const emailLocalPart = normalizedEmail.split("@")[0] ?? "";
+
+  addSearchPrefixes(keywords, normalizedDisplayName);
+  addSearchPrefixes(keywords, compactDisplayName);
+  addSearchPrefixes(keywords, normalizedEmail);
+  addSearchPrefixes(keywords, emailLocalPart);
+
+  normalizedDisplayName
+    .split(/\s+/)
+    .filter((token) => token.length > 0)
+    .forEach((token) => addSearchPrefixes(keywords, token, 24));
+
+  normalizedEmail
+    .split(/[@._-]+/)
+    .filter((token) => token.length > 0)
+    .forEach((token) => addSearchPrefixes(keywords, token, 24));
+
+  return Array.from(keywords);
+}
+
+function normalizePublicUserProfile(
+  documentId: string,
+  profile: UserProfileDoc,
+): PublicUserProfile {
+  return {
+    id: documentId,
+    displayName: profile.displayName,
+    email: profile.email,
+    photoURL: profile.photoURL ?? null,
+  };
+}
+
+function normalizeFriendRequestRecord(
+  documentId: string,
+  request: FriendRequestDoc,
+): FriendRequestRecord {
+  return {
+    id: documentId,
+    fromUserId: request.fromUserId,
+    toUserId: request.toUserId,
+    fromProfile: {
+      id: request.fromUserId,
+      displayName: request.fromDisplayName,
+      email: request.fromEmail,
+      photoURL: request.fromPhotoURL ?? null,
+    },
+    toProfile: {
+      id: request.toUserId,
+      displayName: request.toDisplayName,
+      email: request.toEmail,
+      photoURL: request.toPhotoURL ?? null,
+    },
+    status: request.status,
+    note: request.note ?? "",
+    createdAt: request.createdAt,
+    updatedAt: request.updatedAt,
+    respondedAt: request.respondedAt ?? null,
+    friendshipId: request.friendshipId ?? null,
+  };
+}
+
+function normalizeFriendshipRecord(
+  documentId: string,
+  friendship: FriendshipDoc,
+): FriendshipRecord {
+  return {
+    id: documentId,
+    memberIds: Array.isArray(friendship.memberIds) ? friendship.memberIds : [],
+    members: Array.isArray(friendship.members) ? friendship.members : [],
+    createdAt: friendship.createdAt,
+    updatedAt: friendship.updatedAt,
+    createdFromRequestId: friendship.createdFromRequestId ?? null,
+  };
+}
+
+function buildFriendRequestId(fromUserId: string, toUserId: string): string {
+  return `${fromUserId}__${toUserId}`;
+}
+
+function buildFriendshipId(userAId: string, userBId: string): string {
+  return [userAId, userBId].sort((left, right) => left.localeCompare(right)).join("__");
+}
+
+async function getPublicUserProfileOrThrow(uid: string): Promise<PublicUserProfile> {
+  const snapshot = await getDoc(userDocRef(uid));
+  if (!snapshot.exists()) {
+    throw new Error(`Profil utilisateur "${uid}" introuvable.`);
+  }
+
+  return normalizePublicUserProfile(uid, snapshot.data() as UserProfileDoc);
+}
+
 function normalizeExerciseDoc(exercise: ExerciseDoc): ExerciseDoc {
   return {
     ...exercise,
@@ -443,12 +606,20 @@ export async function upsertUserProfile(
 ): Promise<void> {
   const reference = userDocRef(uid);
   const snapshot = await getDoc(reference);
+  const displayName = input.displayName.trim() || "Membre TrackFit";
+  const email = input.email.trim().toLowerCase();
+  const photoURL = input.photoURL?.trim() ? input.photoURL.trim() : null;
+  const searchKeywords = buildUserSearchKeywords(displayName, email);
 
   if (!snapshot.exists()) {
     const createPayload: WithFieldValue<UserProfileDoc> = {
-      displayName: input.displayName,
-      email: input.email,
+      displayName,
+      email,
       defaultRestSec: input.defaultRestSec ?? 30,
+      photoURL,
+      displayNameLowercase: normalizeSearchableValue(displayName),
+      emailLowercase: normalizeSearchableValue(email),
+      searchKeywords,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -457,12 +628,337 @@ export async function upsertUserProfile(
   }
 
   const updatePayload: PartialWithFieldValue<UserProfileDoc> = {
-    displayName: input.displayName,
-    email: input.email,
+    displayName,
+    email,
     defaultRestSec: input.defaultRestSec ?? 30,
+    photoURL,
+    displayNameLowercase: normalizeSearchableValue(displayName),
+    emailLowercase: normalizeSearchableValue(email),
+    searchKeywords,
     updatedAt: serverTimestamp(),
   };
   await setDoc(reference, updatePayload, { merge: true });
+}
+
+export async function listDiscoverableUserProfiles(
+  currentUserId: string,
+  maxItems = 8,
+): Promise<PublicUserProfile[]> {
+  const snapshot = await getDocs(
+    query(usersCollectionRef(), orderBy("updatedAt", "desc"), limit(maxItems + 8)),
+  );
+
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizePublicUserProfile(documentSnapshot.id, documentSnapshot.data() as UserProfileDoc),
+    )
+    .filter((profile) => profile.id !== currentUserId)
+    .slice(0, maxItems);
+}
+
+export async function searchUserProfiles(
+  currentUserId: string,
+  rawSearchTerm: string,
+  maxItems = 8,
+): Promise<PublicUserProfile[]> {
+  const searchTerm = normalizeSearchableValue(rawSearchTerm).slice(0, 32);
+  if (!searchTerm) {
+    return listDiscoverableUserProfiles(currentUserId, maxItems);
+  }
+
+  const searchSnapshot = await getDocs(
+    query(
+      usersCollectionRef(),
+      where("searchKeywords", "array-contains", searchTerm),
+      limit(maxItems + 8),
+    ),
+  );
+
+  const directMatches = searchSnapshot.docs
+    .map((documentSnapshot) =>
+      normalizePublicUserProfile(documentSnapshot.id, documentSnapshot.data() as UserProfileDoc),
+    )
+    .filter((profile) => profile.id !== currentUserId)
+    .sort((left, right) => left.displayName.localeCompare(right.displayName, "fr"));
+
+  if (directMatches.length > 0) {
+    return directMatches.slice(0, maxItems);
+  }
+
+  const fallbackProfiles = await listDiscoverableUserProfiles(currentUserId, Math.max(maxItems * 4, 24));
+
+  return fallbackProfiles
+    .filter((profile) => {
+      const haystack = normalizeSearchableValue(`${profile.displayName} ${profile.email}`);
+      return haystack.includes(searchTerm);
+    })
+    .slice(0, maxItems);
+}
+
+export async function sendFriendRequest(
+  fromUserId: string,
+  toUserId: string,
+  note = "",
+): Promise<SendFriendRequestResult> {
+  if (fromUserId === toUserId) {
+    throw new Error("Impossible de vous ajouter vous-meme.");
+  }
+
+  const [fromProfile, toProfile] = await Promise.all([
+    getPublicUserProfileOrThrow(fromUserId),
+    getPublicUserProfileOrThrow(toUserId),
+  ]);
+  const requestId = buildFriendRequestId(fromUserId, toUserId);
+  const inverseRequestId = buildFriendRequestId(toUserId, fromUserId);
+  const friendshipId = buildFriendshipId(fromUserId, toUserId);
+
+  return runTransaction(db, async (transaction) => {
+    const requestReference = friendRequestDocRef(requestId);
+    const inverseRequestReference = friendRequestDocRef(inverseRequestId);
+    const friendshipReference = friendshipDocRef(friendshipId);
+
+    const [requestSnapshot, inverseRequestSnapshot, friendshipSnapshot] = await Promise.all([
+      transaction.get(requestReference),
+      transaction.get(inverseRequestReference),
+      transaction.get(friendshipReference),
+    ]);
+
+    if (friendshipSnapshot.exists()) {
+      throw new Error("Vous etes deja amis.");
+    }
+
+    if (inverseRequestSnapshot.exists()) {
+      const inverseRequest = inverseRequestSnapshot.data() as FriendRequestDoc;
+      if (inverseRequest.status === "pending") {
+        const members: FriendshipMemberSnapshot[] = [
+          {
+            uid: fromProfile.id,
+            displayName: fromProfile.displayName,
+            email: fromProfile.email,
+            photoURL: fromProfile.photoURL,
+          },
+          {
+            uid: toProfile.id,
+            displayName: toProfile.displayName,
+            email: toProfile.email,
+            photoURL: toProfile.photoURL,
+          },
+        ];
+
+        transaction.set(
+          friendshipReference,
+          {
+            memberIds: [fromUserId, toUserId].sort((left, right) => left.localeCompare(right)),
+            members,
+            createdFromRequestId: inverseRequestId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          } satisfies WithFieldValue<FriendshipDoc>,
+        );
+        transaction.set(
+          inverseRequestReference,
+          {
+            status: "accepted",
+            respondedAt: serverTimestamp(),
+            friendshipId,
+            updatedAt: serverTimestamp(),
+          } satisfies PartialWithFieldValue<FriendRequestDoc>,
+          { merge: true },
+        );
+
+        return {
+          status: "accepted_existing",
+          requestId: inverseRequestId,
+          friendshipId,
+        } satisfies SendFriendRequestResult;
+      }
+    }
+
+    if (requestSnapshot.exists()) {
+      const existingRequest = requestSnapshot.data() as FriendRequestDoc;
+      if (existingRequest.status === "pending") {
+        throw new Error("Une demande est deja en attente pour cet utilisateur.");
+      }
+    }
+
+    transaction.set(
+      requestReference,
+      {
+        fromUserId,
+        toUserId,
+        fromDisplayName: fromProfile.displayName,
+        fromEmail: fromProfile.email,
+        fromPhotoURL: fromProfile.photoURL,
+        toDisplayName: toProfile.displayName,
+        toEmail: toProfile.email,
+        toPhotoURL: toProfile.photoURL,
+        status: "pending",
+        note: note.trim(),
+        respondedAt: null,
+        friendshipId: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      } satisfies WithFieldValue<FriendRequestDoc>,
+      { merge: true },
+    );
+
+    return {
+      status: "sent",
+      requestId,
+      friendshipId: null,
+    } satisfies SendFriendRequestResult;
+  });
+}
+
+export async function listIncomingFriendRequests(
+  userId: string,
+  maxItems = 20,
+): Promise<FriendRequestRecord[]> {
+  const snapshot = await getDocs(
+    query(
+      friendRequestsCollectionRef(),
+      where("toUserId", "==", userId),
+      where("status", "==", "pending"),
+      limit(maxItems),
+    ),
+  );
+
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizeFriendRequestRecord(documentSnapshot.id, documentSnapshot.data() as FriendRequestDoc),
+    )
+    .sort((left, right) => right.createdAt.toMillis() - left.createdAt.toMillis());
+}
+
+export async function listSentFriendRequests(
+  userId: string,
+  maxItems = 20,
+): Promise<FriendRequestRecord[]> {
+  const snapshot = await getDocs(
+    query(
+      friendRequestsCollectionRef(),
+      where("fromUserId", "==", userId),
+      where("status", "==", "pending"),
+      limit(maxItems),
+    ),
+  );
+
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizeFriendRequestRecord(documentSnapshot.id, documentSnapshot.data() as FriendRequestDoc),
+    )
+    .sort((left, right) => right.createdAt.toMillis() - left.createdAt.toMillis());
+}
+
+export async function listFriendships(
+  userId: string,
+  maxItems = 50,
+): Promise<FriendshipRecord[]> {
+  const snapshot = await getDocs(
+    query(friendshipsCollectionRef(), where("memberIds", "array-contains", userId), limit(maxItems)),
+  );
+
+  return snapshot.docs
+    .map((documentSnapshot) =>
+      normalizeFriendshipRecord(documentSnapshot.id, documentSnapshot.data() as FriendshipDoc),
+    )
+    .sort((left, right) => right.createdAt.toMillis() - left.createdAt.toMillis());
+}
+
+export async function acceptFriendRequest(
+  userId: string,
+  requestId: string,
+): Promise<string> {
+  return runTransaction(db, async (transaction) => {
+    const requestReference = friendRequestDocRef(requestId);
+    const requestSnapshot = await transaction.get(requestReference);
+
+    if (!requestSnapshot.exists()) {
+      throw new Error("Demande introuvable.");
+    }
+
+    const request = requestSnapshot.data() as FriendRequestDoc;
+    if (request.toUserId !== userId) {
+      throw new Error("Action non autorisee.");
+    }
+    if (request.status !== "pending") {
+      throw new Error("Cette demande a deja ete traitee.");
+    }
+
+    const friendshipId = buildFriendshipId(request.fromUserId, request.toUserId);
+    const friendshipReference = friendshipDocRef(friendshipId);
+    const friendshipSnapshot = await transaction.get(friendshipReference);
+
+    if (!friendshipSnapshot.exists()) {
+      const members: FriendshipMemberSnapshot[] = [
+        {
+          uid: request.fromUserId,
+          displayName: request.fromDisplayName,
+          email: request.fromEmail,
+          photoURL: request.fromPhotoURL ?? null,
+        },
+        {
+          uid: request.toUserId,
+          displayName: request.toDisplayName,
+          email: request.toEmail,
+          photoURL: request.toPhotoURL ?? null,
+        },
+      ];
+
+      transaction.set(friendshipReference, {
+        memberIds: [request.fromUserId, request.toUserId].sort((left, right) =>
+          left.localeCompare(right),
+        ),
+        members,
+        createdFromRequestId: requestId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      } satisfies WithFieldValue<FriendshipDoc>);
+    }
+
+    transaction.set(
+      requestReference,
+      {
+        status: "accepted",
+        respondedAt: serverTimestamp(),
+        friendshipId,
+        updatedAt: serverTimestamp(),
+      } satisfies PartialWithFieldValue<FriendRequestDoc>,
+      { merge: true },
+    );
+
+    return friendshipId;
+  });
+}
+
+export async function declineFriendRequest(
+  userId: string,
+  requestId: string,
+): Promise<void> {
+  const requestReference = friendRequestDocRef(requestId);
+  const requestSnapshot = await getDoc(requestReference);
+
+  if (!requestSnapshot.exists()) {
+    throw new Error("Demande introuvable.");
+  }
+
+  const request = requestSnapshot.data() as FriendRequestDoc;
+  if (request.toUserId !== userId) {
+    throw new Error("Action non autorisee.");
+  }
+  if (request.status !== "pending") {
+    throw new Error("Cette demande a deja ete traitee.");
+  }
+
+  await setDoc(
+    requestReference,
+    {
+      status: "declined",
+      respondedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    } satisfies PartialWithFieldValue<FriendRequestDoc>,
+    { merge: true },
+  );
 }
 
 export async function createExercise(

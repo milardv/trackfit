@@ -29,6 +29,7 @@ import {
   toMillis,
 } from "./utils.ts";
 import { BodyCompositionCards } from "./components/BodyCompositionCards.tsx";
+import { FriendsSection } from "./components/FriendsSection.tsx";
 import { PhotoGalleryScreen } from "./components/PhotoGalleryScreen.tsx";
 import { ProfileIdentityCard } from "./components/ProfileIdentityCard.tsx";
 import { ProgressPhotosSection } from "./components/ProgressPhotosSection.tsx";
@@ -436,6 +437,11 @@ export function ProgressScreen({
                     void handleSignOut();
                   }}
                   isSigningOut={isSigningOut}
+                />
+
+                <FriendsSection
+                  userId={userId}
+                  displayName={resolvedDisplayName}
                 />
 
                 <BodyCompositionCards summary={summary} />

@@ -36,6 +36,7 @@ export function useAuthSession(): UseAuthSessionResult {
         displayName: nextUser.displayName ?? "Membre TrackFit",
         email: nextUser.email,
         defaultRestSec: 30,
+        photoURL: nextUser.photoURL ?? null,
       }).catch(() => {
         // Keep UX smooth even if profile sync fails temporarily.
       });

@@ -10,14 +10,62 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // User profile + all user subcollections used by the app:
-    // exercises, plans, sessions, bodyMetrics, progressPhotos, exerciseStats, etc.
-    match /users/{uid} {
-      allow read, write: if isOwner(uid);
+    function isFriendRequestParticipant(fromUserId, toUserId) {
+      return isSignedIn() && (request.auth.uid == fromUserId || request.auth.uid == toUserId);
+    }
 
+    // Public user profile at the root document, searchable by signed-in users.
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(uid);
+
+      // Private user data lives in subcollections and remains owner-only.
       match /{document=**} {
         allow read, write: if isOwner(uid);
       }
+    }
+
+    match /friendRequests/{requestId} {
+      allow read: if isFriendRequestParticipant(resource.data.fromUserId, resource.data.toUserId);
+
+      allow create: if isSignedIn()
+        && request.resource.data.fromUserId == request.auth.uid
+        && request.resource.data.toUserId is string
+        && request.resource.data.toUserId != request.auth.uid
+        && request.resource.data.status == "pending";
+
+      allow update: if isSignedIn()
+        && request.resource.data.fromUserId == resource.data.fromUserId
+        && request.resource.data.toUserId == resource.data.toUserId
+        && (
+          (
+            resource.data.fromUserId == request.auth.uid
+            && request.resource.data.status == "pending"
+          )
+          || (
+            resource.data.toUserId == request.auth.uid
+            && resource.data.status == "pending"
+            && request.resource.data.status in ["accepted", "declined"]
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    match /friendships/{friendshipId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+
+      allow create: if isSignedIn()
+        && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.memberIds.size() == 2
+        && request.resource.data.createdFromRequestId is string
+        && getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.createdFromRequestId)).data.status == "accepted"
+        && getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.createdFromRequestId)).data.friendshipId == friendshipId
+        && request.auth.uid == getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.createdFromRequestId)).data.toUserId
+        && getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.createdFromRequestId)).data.fromUserId in request.resource.data.memberIds
+        && getAfter(/databases/$(database)/documents/friendRequests/$(request.resource.data.createdFromRequestId)).data.toUserId in request.resource.data.memberIds;
+
+      allow update, delete: if false;
     }
 
     // Shared exercise catalog maintained out-of-band (admin/sync job).

@@ -16,6 +16,38 @@ export interface ProfileIdentityCardProps {
   isSigningOut: boolean;
 }
 
+export interface FriendsSectionProps {
+  userId: string;
+  displayName: string;
+}
+
+export interface FriendRequestEntry {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+  note: string;
+}
+
+export interface FriendSuggestionEntry {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+  goalLabel: string;
+}
+
+export interface FriendActivityEntry {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+  presenceLabel: string;
+  activityLabel: string;
+  activityValue: string;
+  isOnline: boolean;
+}
+
 export interface BodyCompositionCardsProps {
   summary: WeightSummary;
 }

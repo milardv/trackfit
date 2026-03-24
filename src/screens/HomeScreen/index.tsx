@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { WorkoutPlanCard } from "../../components/WorkoutPlanCard.tsx";
+import { ExerciseConfigScreen, type ExerciseConfig } from "../ExerciseConfigScreen/index.tsx";
+import { ExercisePickerScreen } from "../ExercisePickerScreen/index.tsx";
 import {
+  createExercise,
   deleteSession,
+  importSharedExerciseToUser,
   listExercises,
   listPlanItems,
   listPlans,
   listSessionExerciseSets,
   listSessionExercises,
   listSessions,
+  listSharedExercises,
   updatePastSession,
 } from "../../services/firestoreService.ts";
 import type {
+  ExerciseDoc,
   SessionDoc,
   SessionExerciseStatus,
   SessionStatus,
+  SharedExerciseDoc,
   TrackingMode,
 } from "../../types/firestore.ts";
 import type { WorkoutPlanToStart } from "../WorkoutScreen/types.ts";
@@ -33,6 +40,9 @@ type HomePlanCard = WorkoutPlanToStart & {
   exerciseCount: number;
   exerciseNames: string[];
 };
+
+type LibraryExerciseOption = ExerciseDoc & { id: string };
+type SharedLibraryExerciseOption = SharedExerciseDoc & { id: string };
 
 interface PastExerciseSummary {
   id: string;
@@ -88,6 +98,17 @@ interface SessionEditDraft {
   status: Exclude<SessionStatus, "active">;
   notes: string;
   exercises: SessionEditDraftExercise[];
+}
+
+interface CompletedExerciseSeed {
+  exerciseId: string;
+  name: string;
+  trackingMode: TrackingMode;
+  targetSets: number;
+  targetReps: number | null;
+  targetWeightKg: number | null;
+  targetDurationSec: number | null;
+  restSec: number;
 }
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -154,20 +175,20 @@ function createEditDraft(session: PastSessionSummary): SessionEditDraft {
     status: toNonActiveSessionStatus(session.status),
     notes: session.notes ?? "",
     exercises: session.exercises.map((exercise) => ({
-        id: exercise.id,
-        exerciseId: exercise.exerciseId,
-        name: exercise.name,
-        status: exercise.status === "cancelled" ? "cancelled" : "completed",
-        trackingMode: exercise.trackingMode,
-        targetSets: exercise.targetSets,
-        targetReps: exercise.targetReps,
-        targetWeightKg: exercise.targetWeightKg,
-        targetDurationSec: exercise.targetDurationSec,
-        restSec: exercise.restSec,
-        completedSets: exercise.completedSets,
-        totalReps: exercise.totalReps,
-        totalDurationSec: exercise.totalDurationSec,
-      })),
+      id: exercise.id,
+      exerciseId: exercise.exerciseId,
+      name: exercise.name,
+      status: exercise.status === "cancelled" ? "cancelled" : "completed",
+      trackingMode: exercise.trackingMode,
+      targetSets: exercise.targetSets,
+      targetReps: exercise.targetReps,
+      targetWeightKg: exercise.targetWeightKg,
+      targetDurationSec: exercise.targetDurationSec,
+      restSec: exercise.restSec,
+      completedSets: exercise.completedSets,
+      totalReps: exercise.totalReps,
+      totalDurationSec: exercise.totalDurationSec,
+    })),
   };
 }
 
@@ -191,6 +212,42 @@ function parseOptionalNumberInput(rawValue: string): number | null {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
 }
 
+function createDraftExerciseId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? `draft-${crypto.randomUUID()}`
+    : `draft-${Date.now()}`;
+}
+
+function createCompletedDraftExercise(seed: CompletedExerciseSeed): SessionEditDraftExercise {
+  const targetSets = Math.max(1, toPositiveInt(seed.targetSets));
+  const targetReps =
+    typeof seed.targetReps === "number" ? Math.max(0, toPositiveInt(seed.targetReps)) : null;
+  const targetWeightKg =
+    typeof seed.targetWeightKg === "number" ? Math.max(0, seed.targetWeightKg) : null;
+  const targetDurationSec =
+    typeof seed.targetDurationSec === "number"
+      ? Math.max(0, toPositiveInt(seed.targetDurationSec))
+      : null;
+  const completedSets = targetSets;
+
+  return {
+    id: createDraftExerciseId(),
+    exerciseId: seed.exerciseId,
+    name: seed.name.trim().length > 0 ? seed.name.trim() : "Exercice",
+    status: "completed",
+    trackingMode: seed.trackingMode,
+    targetSets,
+    targetReps,
+    targetWeightKg,
+    targetDurationSec,
+    restSec: Math.max(0, toPositiveInt(seed.restSec)),
+    completedSets,
+    totalReps: seed.trackingMode === "duration_only" ? 0 : (targetReps ?? 0) * completedSets,
+    totalDurationSec:
+      seed.trackingMode === "duration_only" ? (targetDurationSec ?? 0) * completedSets : 0,
+  };
+}
+
 export function HomeScreen({
   userId,
   displayName,
@@ -211,10 +268,29 @@ export function HomeScreen({
   const [editingPastSessionError, setEditingPastSessionError] = useState<string | null>(null);
   const [sessionEditDraft, setSessionEditDraft] = useState<SessionEditDraft | null>(null);
   const [deletePastSessionError, setDeletePastSessionError] = useState<string | null>(null);
+  const [availableExercises, setAvailableExercises] = useState<LibraryExerciseOption[]>([]);
+  const [sharedExercises, setSharedExercises] = useState<SharedLibraryExerciseOption[]>([]);
+  const [exerciseSearchQuery, setExerciseSearchQuery] = useState("");
+  const [isExercisePickerOpen, setIsExercisePickerOpen] = useState(false);
+  const [isExerciseConfigOpen, setIsExerciseConfigOpen] = useState(false);
+  const [isLoadingExercises, setIsLoadingExercises] = useState(false);
+  const [isLoadingSharedExercises, setIsLoadingSharedExercises] = useState(false);
+  const [importingSharedExerciseId, setImportingSharedExerciseId] = useState<string | null>(null);
+  const [isCreatingExercise, setIsCreatingExercise] = useState(false);
+  const [exerciseCreateError, setExerciseCreateError] = useState<string | null>(null);
   const firstName = getFirstName(displayName);
   const avatarSrc = photoURL ?? buildAvatarUrl(displayName);
   const hasPlan = useMemo(() => Boolean(todaysPlan), [todaysPlan]);
   const recentPastSessions = useMemo(() => pastSessions.slice(0, 8), [pastSessions]);
+  const selectedDraftExerciseIds = useMemo(
+    () =>
+      sessionEditDraft
+        ? sessionEditDraft.exercises
+            .map((exercise) => exercise.exerciseId.trim())
+            .filter((exerciseId) => exerciseId.length > 0)
+        : [],
+    [sessionEditDraft],
+  );
   const nowMs = Date.now();
   const latestSession = pastSessions[0] ?? null;
   const previousSession = pastSessions[1] ?? null;
@@ -417,6 +493,194 @@ export function HomeScreen({
     };
   }, [userId]);
 
+  const appendDraftExercise = (exercise: SessionEditDraftExercise) => {
+    setSessionEditDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        exercises: [...current.exercises, exercise],
+      };
+    });
+  };
+
+  const handleLoadExerciseLibrary = async () => {
+    setIsLoadingExercises(true);
+    setIsLoadingSharedExercises(true);
+    setEditingPastSessionError(null);
+
+    try {
+      const [userExercisesResult, sharedExercisesResult] = await Promise.allSettled([
+        listExercises(userId),
+        listSharedExercises(),
+      ]);
+
+      if (userExercisesResult.status === "rejected") {
+        throw new Error("user-exercises-load-failed");
+      }
+
+      setAvailableExercises(userExercisesResult.value);
+
+      if (sharedExercisesResult.status === "fulfilled") {
+        setSharedExercises(sharedExercisesResult.value);
+      } else {
+        setSharedExercises([]);
+        setEditingPastSessionError(
+          "La bibliotheque partagee n a pas pu etre chargee pour le moment.",
+        );
+      }
+    } catch {
+      setEditingPastSessionError(
+        "Impossible de charger la bibliotheque d exercices. Reessaie dans un instant.",
+      );
+      setIsExercisePickerOpen(false);
+    } finally {
+      setIsLoadingExercises(false);
+      setIsLoadingSharedExercises(false);
+    }
+  };
+
+  const handleOpenExercisePicker = () => {
+    if (!isEditingPastSession || !sessionEditDraft) {
+      return;
+    }
+
+    setDeletePastSessionError(null);
+    setEditingPastSessionError(null);
+    setExerciseCreateError(null);
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(true);
+    void handleLoadExerciseLibrary();
+  };
+
+  const handleCloseExercisePicker = () => {
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(false);
+  };
+
+  const handleBackFromExerciseConfig = () => {
+    setExerciseCreateError(null);
+    setIsExerciseConfigOpen(false);
+    setIsExercisePickerOpen(true);
+  };
+
+  const handleAddExerciseById = (exerciseId: string) => {
+    const selectedExercise = availableExercises.find((exercise) => exercise.id === exerciseId);
+    if (!selectedExercise) {
+      return;
+    }
+
+    appendDraftExercise(
+      createCompletedDraftExercise({
+        exerciseId: selectedExercise.id,
+        name: selectedExercise.name,
+        trackingMode: selectedExercise.trackingMode,
+        targetSets: selectedExercise.defaultSets,
+        targetReps: selectedExercise.defaultReps,
+        targetWeightKg: selectedExercise.defaultWeightKg,
+        targetDurationSec: selectedExercise.defaultDurationSec,
+        restSec: selectedExercise.defaultRestSec,
+      }),
+    );
+
+    setEditingPastSessionError(null);
+    handleCloseExercisePicker();
+  };
+
+  const handleAddSharedExercise = async (sharedExerciseId: string): Promise<void> => {
+    if (importingSharedExerciseId) {
+      return;
+    }
+
+    setImportingSharedExerciseId(sharedExerciseId);
+    setEditingPastSessionError(null);
+
+    try {
+      const importedExerciseId = await importSharedExerciseToUser(userId, sharedExerciseId);
+      const exercises = await listExercises(userId);
+      setAvailableExercises(exercises);
+      const importedExercise = exercises.find((exercise) => exercise.id === importedExerciseId);
+
+      if (!importedExercise) {
+        throw new Error("imported-exercise-not-found");
+      }
+
+      appendDraftExercise(
+        createCompletedDraftExercise({
+          exerciseId: importedExercise.id,
+          name: importedExercise.name,
+          trackingMode: importedExercise.trackingMode,
+          targetSets: importedExercise.defaultSets,
+          targetReps: importedExercise.defaultReps,
+          targetWeightKg: importedExercise.defaultWeightKg,
+          targetDurationSec: importedExercise.defaultDurationSec,
+          restSec: importedExercise.defaultRestSec,
+        }),
+      );
+      handleCloseExercisePicker();
+    } catch {
+      setEditingPastSessionError(
+        "Impossible d importer cet exercice partage pour le moment.",
+      );
+    } finally {
+      setImportingSharedExerciseId(null);
+    }
+  };
+
+  const handleCreateExerciseFromPicker = () => {
+    setExerciseCreateError(null);
+    setIsExercisePickerOpen(false);
+    setIsExerciseConfigOpen(true);
+  };
+
+  const handleCreateExerciseFromConfig = async (
+    config: ExerciseConfig,
+  ): Promise<void> => {
+    if (isCreatingExercise) {
+      return;
+    }
+
+    setIsCreatingExercise(true);
+    setExerciseCreateError(null);
+
+    try {
+      const createdExerciseId = await createExercise(userId, {
+        name: config.name,
+        category: "personnalise",
+        trackingMode: config.trackingMode,
+        defaultSets: config.sets,
+        defaultReps: config.reps,
+        defaultWeightKg: config.weightKg,
+        defaultDurationSec: config.durationSec,
+        defaultRestSec: config.restSec,
+      });
+      const exercises = await listExercises(userId);
+      setAvailableExercises(exercises);
+      appendDraftExercise(
+        createCompletedDraftExercise({
+          exerciseId: createdExerciseId,
+          name: config.name,
+          trackingMode: config.trackingMode,
+          targetSets: config.sets,
+          targetReps: config.reps,
+          targetWeightKg: config.weightKg,
+          targetDurationSec: config.durationSec,
+          restSec: config.restSec,
+        }),
+      );
+      setIsExerciseConfigOpen(false);
+      setEditingPastSessionError(null);
+    } catch {
+      setExerciseCreateError(
+        "Impossible de creer l exercice pour le moment. Reessaie dans un instant.",
+      );
+    } finally {
+      setIsCreatingExercise(false);
+    }
+  };
+
   const handleOpenSessionDetails = async (session: PastSessionSummary) => {
     setDeletePastSessionError(null);
     setEditingPastSessionError(null);
@@ -488,6 +752,10 @@ export function HomeScreen({
     }
     setDeletePastSessionError(null);
     setEditingPastSessionError(null);
+    setExerciseCreateError(null);
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(false);
+    setIsExerciseConfigOpen(false);
     setIsEditingPastSession(false);
     setSessionEditDraft(null);
     setSelectedSession(null);
@@ -530,6 +798,9 @@ export function HomeScreen({
 
     setDeletePastSessionError(null);
     setEditingPastSessionError(null);
+    setExerciseCreateError(null);
+    setIsExercisePickerOpen(false);
+    setIsExerciseConfigOpen(false);
     setSessionEditDraft(createEditDraft(selectedSession));
     setIsEditingPastSession(true);
   };
@@ -540,6 +811,10 @@ export function HomeScreen({
     }
 
     setEditingPastSessionError(null);
+    setExerciseCreateError(null);
+    setExerciseSearchQuery("");
+    setIsExercisePickerOpen(false);
+    setIsExerciseConfigOpen(false);
     setSessionEditDraft(null);
     setIsEditingPastSession(false);
   };
@@ -568,16 +843,12 @@ export function HomeScreen({
         return current;
       }
 
-      const draftId =
-        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-          ? `draft-${crypto.randomUUID()}`
-          : `draft-${Date.now()}`;
       return {
         ...current,
         exercises: [
           ...current.exercises,
           {
-            id: draftId,
+            id: createDraftExerciseId(),
             exerciseId: "",
             name: "Nouvel exercice",
             status: "completed",
@@ -725,6 +996,10 @@ export function HomeScreen({
       );
       setSelectedSession(normalizedSession);
       setSessionEditDraft(createEditDraft(normalizedSession));
+      setExerciseCreateError(null);
+      setExerciseSearchQuery("");
+      setIsExercisePickerOpen(false);
+      setIsExerciseConfigOpen(false);
       setIsEditingPastSession(false);
     } catch {
       setEditingPastSessionError(
@@ -1092,14 +1367,24 @@ export function HomeScreen({
                     Exercices
                   </h4>
                   {isEditingPastSession ? (
-                    <button
-                      type="button"
-                      onClick={handleAddExerciseToDraft}
-                      className="flex h-8 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
-                    >
-                      <span className="material-symbols-outlined text-sm">add</span>
-                      Ajouter
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleOpenExercisePicker}
+                        className="flex h-8 items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                      >
+                        <span className="material-symbols-outlined text-sm">fitness_center</span>
+                        Bibliotheque
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddExerciseToDraft}
+                        className="flex h-8 items-center gap-1 rounded-full border border-white/10 bg-card-dark px-3 text-xs font-semibold text-white transition-colors hover:border-white/20"
+                      >
+                        <span className="material-symbols-outlined text-sm">edit_square</span>
+                        Manuel
+                      </button>
+                    </div>
                   ) : null}
                 </div>
 
@@ -1385,6 +1670,33 @@ export function HomeScreen({
             </footer>
           </div>
         </div>
+      ) : null}
+
+      {isExercisePickerOpen ? (
+        <ExercisePickerScreen
+          userExercises={availableExercises}
+          sharedExercises={sharedExercises}
+          selectedExerciseIds={selectedDraftExerciseIds}
+          searchQuery={exerciseSearchQuery}
+          isLoadingUserExercises={isLoadingExercises}
+          isLoadingSharedExercises={isLoadingSharedExercises}
+          importingSharedExerciseId={importingSharedExerciseId}
+          onSearchChange={setExerciseSearchQuery}
+          onClose={handleCloseExercisePicker}
+          onAddExercise={handleAddExerciseById}
+          onAddSharedExercise={handleAddSharedExercise}
+          onCreateExercise={handleCreateExerciseFromPicker}
+        />
+      ) : null}
+
+      {isExerciseConfigOpen ? (
+        <ExerciseConfigScreen
+          onBack={handleBackFromExerciseConfig}
+          onCreate={handleCreateExerciseFromConfig}
+          isSubmitting={isCreatingExercise}
+          errorMessage={exerciseCreateError}
+          zIndexClass="z-[102]"
+        />
       ) : null}
     </div>
   );

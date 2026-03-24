@@ -19,6 +19,14 @@ export const SESSION_EXERCISE_STATUSES = [
 
 export type SessionExerciseStatus = (typeof SESSION_EXERCISE_STATUSES)[number];
 export type EstimationSource = "formula" | "gemini" | "hybrid" | "formula_fallback";
+export const FRIEND_REQUEST_STATUSES = [
+  "pending",
+  "accepted",
+  "declined",
+  "cancelled",
+] as const;
+
+export type FriendRequestStatus = (typeof FRIEND_REQUEST_STATUSES)[number];
 
 interface TimestampedDoc {
   createdAt: Timestamp;
@@ -29,6 +37,38 @@ export interface UserProfileDoc extends TimestampedDoc {
   displayName: string;
   email: string;
   defaultRestSec: number;
+  photoURL?: string | null;
+  displayNameLowercase?: string;
+  emailLowercase?: string;
+  searchKeywords?: string[];
+}
+
+export interface FriendshipMemberSnapshot {
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL: string | null;
+}
+
+export interface FriendRequestDoc extends TimestampedDoc {
+  fromUserId: string;
+  toUserId: string;
+  fromDisplayName: string;
+  fromEmail: string;
+  fromPhotoURL: string | null;
+  toDisplayName: string;
+  toEmail: string;
+  toPhotoURL: string | null;
+  status: FriendRequestStatus;
+  note: string;
+  respondedAt: Timestamp | null;
+  friendshipId: string | null;
+}
+
+export interface FriendshipDoc extends TimestampedDoc {
+  memberIds: string[];
+  members: FriendshipMemberSnapshot[];
+  createdFromRequestId: string | null;
 }
 
 export interface ExerciseDoc extends TimestampedDoc {
