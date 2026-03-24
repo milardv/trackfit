@@ -32,6 +32,7 @@ import type {
   FriendshipMemberSnapshot,
   PlanDoc,
   PlanItemDoc,
+  PhotoPrivacySettingsDoc,
   ProgressPhotoDoc,
   SharedExerciseDoc,
   SharedExerciseMedia,
@@ -119,6 +120,8 @@ const progressPhotosCollectionRef = (uid: string) =>
   collection(db, "users", uid, "progressPhotos");
 const progressPhotoDocRef = (uid: string, photoId: string) =>
   doc(db, "users", uid, "progressPhotos", photoId);
+const photoPrivacySettingsDocRef = (uid: string) =>
+  doc(db, "users", uid, "settings", "photoPrivacy");
 const exerciseStatsDocRef = (uid: string, exerciseId: string) =>
   doc(db, "users", uid, "exerciseStats", exerciseId);
 const exerciseTimelineCollectionRef = (uid: string, exerciseId: string) =>
@@ -136,6 +139,11 @@ export interface PublicUserProfile {
   displayName: string;
   email: string;
   photoURL: string | null;
+}
+
+export interface PhotoPrivacySettingsRecord {
+  isEnabled: boolean;
+  credentialIds: string[];
 }
 
 export interface FriendRequestRecord {
@@ -1622,6 +1630,21 @@ export async function listPlanItems(
   }));
 }
 
+export async function getPlan(
+  uid: string,
+  planId: string,
+): Promise<(PlanDoc & { id: string }) | null> {
+  const snapshot = await getDoc(planDocRef(uid, planId));
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    ...(snapshot.data() as PlanDoc),
+  };
+}
+
 export async function listSessions(
   uid: string,
   maxItems = 120,
@@ -1637,6 +1660,21 @@ export async function listSessions(
     id: document.id,
     ...(document.data() as SessionDoc),
   }));
+}
+
+export async function getSession(
+  uid: string,
+  sessionId: string,
+): Promise<(SessionDoc & { id: string }) | null> {
+  const snapshot = await getDoc(sessionDocRef(uid, sessionId));
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    ...(snapshot.data() as SessionDoc),
+  };
 }
 
 export async function listSessionExercises(
@@ -1708,6 +1746,64 @@ export async function listProgressPhotos(
     id: document.id,
     ...(document.data() as ProgressPhotoDoc),
   }));
+}
+
+export async function getPhotoPrivacySettings(
+  uid: string,
+): Promise<PhotoPrivacySettingsRecord | null> {
+  const snapshot = await getDoc(photoPrivacySettingsDocRef(uid));
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  const settings = snapshot.data() as Partial<PhotoPrivacySettingsDoc>;
+  return {
+    isEnabled: settings.isEnabled === true,
+    credentialIds: Array.isArray(settings.credentialIds)
+      ? settings.credentialIds.filter((value): value is string => typeof value === "string" && value.length > 0)
+      : [],
+  };
+}
+
+export async function enablePhotoPrivacyForCredential(
+  uid: string,
+  credentialId: string,
+): Promise<PhotoPrivacySettingsRecord> {
+  const reference = photoPrivacySettingsDocRef(uid);
+  const snapshot = await getDoc(reference);
+  const current = snapshot.exists()
+    ? ((snapshot.data() as Partial<PhotoPrivacySettingsDoc>).credentialIds ?? [])
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  const nextCredentialIds = [...new Set([...current, credentialId])];
+
+  await setDoc(
+    reference,
+    {
+      isEnabled: true,
+      credentialIds: nextCredentialIds,
+      createdAt: snapshot.exists() ? snapshot.get("createdAt") ?? serverTimestamp() : serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    } satisfies WithFieldValue<PhotoPrivacySettingsDoc>,
+    { merge: true },
+  );
+
+  return {
+    isEnabled: true,
+    credentialIds: nextCredentialIds,
+  };
+}
+
+export async function disablePhotoPrivacy(uid: string): Promise<void> {
+  await setDoc(
+    photoPrivacySettingsDocRef(uid),
+    {
+      isEnabled: false,
+      credentialIds: [],
+      updatedAt: serverTimestamp(),
+    } satisfies PartialWithFieldValue<PhotoPrivacySettingsDoc>,
+    { merge: true },
+  );
 }
 
 export async function createPlan(
@@ -2324,6 +2420,39 @@ export async function endExercise(
     merge: true,
   });
   batch.set(activeSessionDocRef(uid), activePatch, { merge: true });
+  await batch.commit();
+}
+
+export async function activateSessionExercise(
+  uid: string,
+  sessionId: string,
+  sessionExerciseId: string,
+  activeSetNumber = 1,
+): Promise<void> {
+  const batch = writeBatch(db);
+
+  batch.set(
+    sessionExerciseDocRef(uid, sessionId, sessionExerciseId),
+    {
+      status: "active",
+      endedAt: null,
+      completedAt: null,
+      updatedAt: serverTimestamp(),
+    } satisfies PartialWithFieldValue<SessionExerciseDoc>,
+    { merge: true },
+  );
+  batch.set(
+    activeSessionDocRef(uid),
+    {
+      sessionId,
+      activeExerciseId: sessionExerciseId,
+      activeSetNumber: Math.max(1, Math.round(activeSetNumber)),
+      restEndsAt: null,
+      updatedAt: serverTimestamp(),
+    } satisfies PartialWithFieldValue<ActiveSessionDoc>,
+    { merge: true },
+  );
+
   await batch.commit();
 }
 

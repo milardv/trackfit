@@ -35,11 +35,6 @@ function normalizeSearchValue(value: string): string {
     .toLowerCase();
 }
 
-function getFirstName(displayName: string): string {
-  const [firstName] = displayName.trim().split(/\s+/);
-  return firstName || "toi";
-}
-
 function formatRelativeTime(date: Date): string {
   const diffMs = Date.now() - date.getTime();
   const diffHours = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)));
@@ -165,7 +160,7 @@ function DirectoryUserCard({
   );
 }
 
-export function FriendsSection({ userId, displayName }: FriendsSectionProps) {
+export function FriendsSection({ userId }: FriendsSectionProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [incomingRequests, setIncomingRequests] = useState<FriendRequestRecord[]>([]);
   const [sentRequests, setSentRequests] = useState<FriendRequestRecord[]>([]);
@@ -188,7 +183,6 @@ export function FriendsSection({ userId, displayName }: FriendsSectionProps) {
     () => normalizeSearchValue(deferredQuery),
     [deferredQuery],
   );
-  const firstName = useMemo(() => getFirstName(displayName), [displayName]);
   const isSearchActive = normalizedQuery.length > 0;
 
   useEffect(() => {
@@ -886,10 +880,6 @@ export function FriendsSection({ userId, displayName }: FriendsSectionProps) {
               <h2 className="mt-2 text-2xl font-black tracking-tight text-white">
                 Amis et activité
               </h2>
-              <p className="mt-2 max-w-md text-sm leading-6 text-slate-300">
-                Gère le cercle de {firstName}, vois immédiatement les demandes d'ajout reçues et
-                réponds-y sans quitter le profil.
-              </p>
             </div>
 
             <div className="grid min-w-[118px] grid-cols-1 gap-2 text-right">

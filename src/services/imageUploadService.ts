@@ -11,6 +11,7 @@ export interface GeneratedFadeResult {
 interface CloudinaryMediaSource {
   publicId: string;
   format: string;
+  resourceType: "image" | "video";
 }
 
 interface CloudinaryUploadResponse {
@@ -140,6 +141,7 @@ function extractCloudinaryMediaSource(url: string, cloudName: string): Cloudinar
   const extensionMatch = joined.match(/\.([a-z0-9]+)$/i);
   const format = extensionMatch?.[1]?.toLowerCase() ?? "jpg";
   const publicId = joined.replace(/\.[^/.]+$/, "");
+  const resourceType = segments[uploadIndex - 1] === "video" ? "video" : "image";
 
   if (publicId.trim().length === 0) {
     return null;
@@ -148,7 +150,38 @@ function extractCloudinaryMediaSource(url: string, cloudName: string): Cloudinar
   return {
     publicId,
     format,
+    resourceType,
   };
+}
+
+export function buildBlurredCloudinaryPreviewUrl(url: string | null | undefined): string | null {
+  if (typeof url !== "string" || url.trim().length === 0) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (!parsed.hostname.endsWith("res.cloudinary.com")) {
+    return null;
+  }
+
+  const marker = "/upload/";
+  const markerIndex = parsed.pathname.indexOf(marker);
+  if (markerIndex === -1) {
+    return null;
+  }
+
+  const prefix = parsed.pathname.slice(0, markerIndex + marker.length);
+  const suffix = parsed.pathname.slice(markerIndex + marker.length);
+  const transformations = "c_fill,g_auto,h_960,w_720,e_blur:1200,q_30,f_auto";
+
+  parsed.pathname = `${prefix}${transformations}/${suffix}`;
+  return parsed.toString();
 }
 
 function buildFadeSourceUrl(cloudName: string, sources: CloudinaryMediaSource[]): string {

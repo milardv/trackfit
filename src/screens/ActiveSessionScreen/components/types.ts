@@ -21,6 +21,7 @@ export interface ExerciseListViewProps {
   onStartExercise: (exerciseKey: string) => void;
   onEditExercise: (exerciseKey: string) => void;
   onAddExercise: () => void;
+  onCancelSession: () => void;
   onFinalizeSession: () => void;
   onOpenSummary: () => void;
 }

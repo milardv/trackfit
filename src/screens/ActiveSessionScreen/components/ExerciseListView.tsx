@@ -14,6 +14,7 @@ export function ExerciseListView({
   onStartExercise,
   onEditExercise,
   onAddExercise,
+  onCancelSession,
   onFinalizeSession,
   onOpenSummary,
 }: ExerciseListViewProps) {
@@ -127,6 +128,15 @@ export function ExerciseListView({
               : "Finaliser la seance"}
         </button>
       ) : null}
+
+      <button
+        type="button"
+        onClick={onCancelSession}
+        disabled={isBusy || isFinalizingSession}
+        className="flex h-12 items-center justify-center rounded-xl border border-rose-400/30 bg-rose-500/10 text-sm font-bold text-rose-200 transition-colors hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        Annuler definitivement la seance
+      </button>
     </main>
   );
 }

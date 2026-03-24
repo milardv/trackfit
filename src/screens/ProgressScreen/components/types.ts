@@ -18,7 +18,6 @@ export interface ProfileIdentityCardProps {
 
 export interface FriendsSectionProps {
   userId: string;
-  displayName: string;
 }
 
 export interface FriendRequestEntry {
@@ -64,10 +63,20 @@ export interface WeightHistorySectionProps {
 export interface ProgressPhotosSectionProps {
   photos: ProgressPhotoEntry[];
   currentWeightKg: number | null;
+  photoPrivacyEnabled: boolean;
+  isPhotoPrivacyUnlocked: boolean;
+  isPhotoPrivacySupported: boolean;
+  isPhotoPrivacyBusy: boolean;
+  privacyError: string | null;
+  privacySuccess: string | null;
   isUploadingPhoto: boolean;
   deletingPhotoId: string | null;
   uploadError: string | null;
   uploadSuccess: string | null;
+  onEnableProtection: () => void;
+  onUnlockPhotos: () => void;
+  onLockPhotos: () => void;
+  onDisableProtection: () => void;
   onImportPhoto: () => void;
   onTakePhoto: () => void;
   onOpenGallery: () => void;

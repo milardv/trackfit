@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { User } from "firebase/auth";
 import { BottomNav } from "../components/BottomNav.tsx";
 import { PwaInstallBanner } from "../components/PwaInstallBanner.tsx";
@@ -17,16 +17,31 @@ import { QuickAddScreen } from "../screens/QuickAddScreen/index.tsx";
 import { StatsScreen } from "../screens/StatsScreen/index.tsx";
 import {
   WorkoutScreen,
+  type WorkoutPlanExercise,
   type WorkoutPlanToStart,
 } from "../screens/WorkoutScreen/index.tsx";
 import {
   createExercise,
   createPlanWithItems,
   deletePlan,
+  getActiveSession,
+  getPlan,
+  getSession,
+  listExercises,
+  listPlanItems,
+  listSessionExerciseSets,
+  listSessionExercises,
   updatePlanWithItems,
 } from "../services/firestoreService.ts";
+import type { InterruptedSessionSummary } from "../screens/HomeScreen/types.ts";
+import type {
+  ActiveSessionCloseReason,
+  ActiveSessionResumeState,
+  RuntimeExercise,
+} from "../screens/ActiveSessionScreen/types.ts";
 import { usePwaInstallPrompt } from "../pwa/usePwaInstallPrompt.ts";
 import type { Screen } from "./navigation.ts";
+import { normalizeGymLabel } from "../screens/WorkoutScreen/utils.ts";
 
 interface AppShellProps {
   user: User;
@@ -39,8 +54,249 @@ interface RenderScreenOptions {
   onSignOut: () => Promise<void>;
   onCreateSession: () => void;
   onStartPlan: (plan: WorkoutPlanToStart) => void;
+  onResumeInterruptedSession: () => void;
   onEditPlan: (plan: WorkoutPlanToStart) => void;
+  interruptedSession: InterruptedSessionSummary | null;
+  isLoadingInterruptedSession: boolean;
   workoutRefreshKey: number;
+}
+
+interface InterruptedSessionRecord {
+  plan: WorkoutPlanToStart;
+  initialState: ActiveSessionResumeState;
+  summary: InterruptedSessionSummary;
+}
+
+interface ActiveSessionLaunch {
+  plan: WorkoutPlanToStart;
+  initialState?: ActiveSessionResumeState | null;
+}
+
+function toMillis(value: unknown): number {
+  if (
+    value !== null
+    && typeof value === "object"
+    && "toMillis" in value
+    && typeof (value as { toMillis?: unknown }).toMillis === "function"
+  ) {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+
+  return Date.now();
+}
+
+function toPlanExercise(exercise: RuntimeExercise): WorkoutPlanExercise {
+  return {
+    key: exercise.key,
+    exerciseId: exercise.exerciseId,
+    exerciseName: exercise.exerciseName,
+    order: exercise.order,
+    trackingMode: exercise.trackingMode,
+    targetSets: exercise.targetSets,
+    targetReps: exercise.targetReps,
+    targetWeightKg: exercise.targetWeightKg,
+    targetDurationSec: exercise.targetDurationSec,
+    restSec: exercise.restSec,
+    instructions: exercise.instructions ?? null,
+    isMachine: exercise.isMachine ?? false,
+    hasImage: exercise.hasImage ?? false,
+    hasVideo: exercise.hasVideo ?? false,
+    media: exercise.media ?? null,
+    source: exercise.source ?? null,
+    sourceUrl: exercise.sourceUrl ?? null,
+    sourceId: exercise.sourceId ?? null,
+    license: exercise.license ?? null,
+  };
+}
+
+async function loadInterruptedSessionRecord(
+  uid: string,
+): Promise<InterruptedSessionRecord | null> {
+  const activeSession = await getActiveSession(uid);
+  if (!activeSession?.sessionId) {
+    return null;
+  }
+
+  const session = await getSession(uid, activeSession.sessionId);
+  if (!session || session.status !== "active") {
+    return null;
+  }
+
+  const [sessionExercises, localExercises, planDoc] = await Promise.all([
+    listSessionExercises(uid, session.id, 150),
+    listExercises(uid, 500, true),
+    session.planId ? getPlan(uid, session.planId) : Promise.resolve(null),
+  ]);
+  const planItems = session.planId && planDoc
+    ? await listPlanItems(uid, session.planId, 150).catch(() => [])
+    : [];
+  const setsEntries = await Promise.all(
+    sessionExercises.map(async (exercise) => ({
+      sessionExerciseId: exercise.id,
+      sets: await listSessionExerciseSets(uid, session.id, exercise.id, 200),
+    })),
+  );
+
+  const exerciseById = new Map(localExercises.map((exercise) => [exercise.id, exercise]));
+  const setsBySessionExerciseId = new Map(
+    setsEntries.map((entry) => [entry.sessionExerciseId, entry.sets]),
+  );
+  const sortedSessionExercises = sessionExercises
+    .slice()
+    .sort((left, right) => left.order - right.order);
+  const usedSessionExerciseIds = new Set<string>();
+
+  const plannedExercises: RuntimeExercise[] = planItems
+    .slice()
+    .sort((left, right) => left.order - right.order)
+    .map((item, index) => {
+      const linkedExercise = exerciseById.get(item.exerciseId);
+      const matchedSessionExercise = sortedSessionExercises.find(
+        (sessionExercise) =>
+          !usedSessionExerciseIds.has(sessionExercise.id)
+          && sessionExercise.exerciseId === item.exerciseId
+          && sessionExercise.order === item.order,
+      );
+
+      if (matchedSessionExercise) {
+        usedSessionExerciseIds.add(matchedSessionExercise.id);
+      }
+
+      const matchedSets = matchedSessionExercise
+        ? setsBySessionExerciseId.get(matchedSessionExercise.id) ?? []
+        : [];
+      const isCurrentActive = matchedSessionExercise
+        ? activeSession.activeExerciseId === matchedSessionExercise.id
+        : false;
+      const status: RuntimeExercise["status"] = matchedSessionExercise
+        ? matchedSessionExercise.status === "completed"
+          ? "completed"
+          : isCurrentActive
+            ? "in_progress"
+            : "pending"
+        : "pending";
+
+      return {
+        key: matchedSessionExercise
+          ? `session-${matchedSessionExercise.id}`
+          : `plan-${item.id}-${index}`,
+        exerciseId: item.exerciseId,
+        exerciseName: matchedSessionExercise?.exerciseNameSnapshot ?? linkedExercise?.name ?? "Exercice",
+        order: item.order,
+        trackingMode: matchedSessionExercise?.trackingMode ?? linkedExercise?.trackingMode ?? "reps_only",
+        targetSets: Math.max(1, matchedSessionExercise?.targetSets ?? item.targetSets),
+        targetReps: matchedSessionExercise?.targetReps ?? item.targetReps ?? null,
+        targetWeightKg: matchedSessionExercise?.targetWeightKg ?? item.targetWeightKg ?? null,
+        targetDurationSec: matchedSessionExercise?.targetDurationSec ?? item.targetDurationSec ?? null,
+        restSec: Math.max(0, matchedSessionExercise?.restSec ?? item.restSec),
+        instructions: linkedExercise?.instructions ?? null,
+        isMachine: linkedExercise?.isMachine ?? false,
+        hasImage: linkedExercise?.hasImage ?? false,
+        hasVideo: linkedExercise?.hasVideo ?? false,
+        media: linkedExercise?.media ?? null,
+        source: linkedExercise?.source ?? null,
+        sourceUrl: linkedExercise?.sourceUrl ?? null,
+        sourceId: linkedExercise?.sourceId ?? null,
+        license: linkedExercise?.license ?? null,
+        status,
+        sessionExerciseId: matchedSessionExercise?.id ?? null,
+        startedAtMs:
+          status === "in_progress" && matchedSessionExercise
+            ? toMillis(matchedSessionExercise.startedAt)
+            : null,
+        loggedSets: matchedSets
+          .slice()
+          .sort((left, right) => left.setNumber - right.setNumber)
+          .map((setEntry) => ({
+            setNumber: setEntry.setNumber,
+            reps: setEntry.reps ?? null,
+            weightKg: setEntry.weightKg ?? null,
+            durationSec: setEntry.durationSec ?? null,
+          })),
+      };
+    });
+
+  const extraExercises: RuntimeExercise[] = sortedSessionExercises
+    .filter((exercise) => !usedSessionExerciseIds.has(exercise.id))
+    .map((exercise) => {
+      const linkedExercise = exerciseById.get(exercise.exerciseId);
+      const loggedSets = (setsBySessionExerciseId.get(exercise.id) ?? [])
+        .slice()
+        .sort((left, right) => left.setNumber - right.setNumber)
+        .map((setEntry) => ({
+          setNumber: setEntry.setNumber,
+          reps: setEntry.reps ?? null,
+          weightKg: setEntry.weightKg ?? null,
+          durationSec: setEntry.durationSec ?? null,
+        }));
+      const isCurrentActive = activeSession.activeExerciseId === exercise.id;
+      const status: RuntimeExercise["status"] =
+        exercise.status === "completed"
+          ? "completed"
+          : isCurrentActive
+            ? "in_progress"
+            : "pending";
+
+      return {
+        key: `session-${exercise.id}`,
+        exerciseId: exercise.exerciseId,
+        exerciseName: exercise.exerciseNameSnapshot,
+        order: exercise.order,
+        trackingMode: exercise.trackingMode,
+        targetSets: Math.max(1, exercise.targetSets),
+        targetReps: exercise.targetReps ?? null,
+        targetWeightKg: exercise.targetWeightKg ?? null,
+        targetDurationSec: exercise.targetDurationSec ?? null,
+        restSec: Math.max(0, exercise.restSec),
+        instructions: linkedExercise?.instructions ?? null,
+        isMachine: linkedExercise?.isMachine ?? false,
+        hasImage: linkedExercise?.hasImage ?? false,
+        hasVideo: linkedExercise?.hasVideo ?? false,
+        media: linkedExercise?.media ?? null,
+        source: linkedExercise?.source ?? null,
+        sourceUrl: linkedExercise?.sourceUrl ?? null,
+        sourceId: linkedExercise?.sourceId ?? null,
+        license: linkedExercise?.license ?? null,
+        status,
+        sessionExerciseId: exercise.id,
+        startedAtMs: status === "in_progress" ? toMillis(exercise.startedAt) : null,
+        loggedSets,
+      };
+    });
+
+  const exercises = [...plannedExercises, ...extraExercises]
+    .slice()
+    .sort((left, right) => left.order - right.order);
+  const activeExercise =
+    exercises.find((exercise) => exercise.sessionExerciseId === activeSession.activeExerciseId)
+    ?? null;
+  const plan: WorkoutPlanToStart = {
+    id: planDoc?.id ?? session.planId ?? session.id,
+    name: planDoc?.name ?? "Seance interrompue",
+    gymName: normalizeGymLabel(planDoc?.gymName ?? session.gymName),
+    estimatedDurationMin: session.estimatedDurationMin ?? null,
+    estimatedCaloriesKcal: session.estimatedCaloriesKcal ?? null,
+    estimationSource: session.estimationSource ?? null,
+    exercises: exercises.map(toPlanExercise),
+  };
+
+  return {
+    plan,
+    initialState: {
+      sessionId: session.id,
+      activeExerciseKey: activeExercise?.key ?? null,
+      restEndsAtMs: activeSession.restEndsAt ? toMillis(activeSession.restEndsAt) : null,
+      exercises,
+    },
+    summary: {
+      name: plan.name,
+      gymName: plan.gymName,
+      startedAtMs: toMillis(session.startedAt),
+      completedCount: exercises.filter((exercise) => exercise.status === "completed").length,
+      totalCount: exercises.length,
+      activeExerciseName: activeExercise?.exerciseName ?? null,
+    },
+  };
 }
 
 function renderScreen(screen: Screen, options: RenderScreenOptions) {
@@ -49,7 +305,10 @@ function renderScreen(screen: Screen, options: RenderScreenOptions) {
     onSignOut,
     onCreateSession,
     onStartPlan,
+    onResumeInterruptedSession,
     onEditPlan,
+    interruptedSession,
+    isLoadingInterruptedSession,
     workoutRefreshKey,
   } =
     options;
@@ -60,8 +319,12 @@ function renderScreen(screen: Screen, options: RenderScreenOptions) {
         userId={user.uid}
         displayName={user.displayName ?? "Membre TrackFit"}
         photoURL={user.photoURL}
+        interruptedSession={interruptedSession}
+        isLoadingInterruptedSession={isLoadingInterruptedSession}
         onCreateSession={onCreateSession}
         onStartPlan={onStartPlan}
+        onResumeInterruptedSession={onResumeInterruptedSession}
+        refreshKey={workoutRefreshKey}
       />
     );
   }
@@ -110,9 +373,30 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   const [sessionCreateError, setSessionCreateError] = useState<string | null>(
     null,
   );
-  const [activePlan, setActivePlan] = useState<WorkoutPlanToStart | null>(null);
+  const [activePlan, setActivePlan] = useState<ActiveSessionLaunch | null>(null);
+  const [interruptedSession, setInterruptedSession] = useState<InterruptedSessionRecord | null>(
+    null,
+  );
+  const [isLoadingInterruptedSession, setIsLoadingInterruptedSession] = useState(true);
   const [editingPlan, setEditingPlan] = useState<WorkoutPlanToStart | null>(null);
   const { canInstall, isInstalled, showIosInstallHint, promptInstall } = usePwaInstallPrompt();
+
+  const refreshInterruptedSession = useCallback(async () => {
+    setIsLoadingInterruptedSession(true);
+
+    try {
+      const session = await loadInterruptedSessionRecord(user.uid);
+      setInterruptedSession(session);
+    } catch {
+      setInterruptedSession(null);
+    } finally {
+      setIsLoadingInterruptedSession(false);
+    }
+  }, [user.uid]);
+
+  useEffect(() => {
+    void refreshInterruptedSession();
+  }, [refreshInterruptedSession]);
 
   const handleCreateExercise = () => {
     setExerciseCreateError(null);
@@ -261,16 +545,46 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
   };
 
   const handleStartPlan = (plan: WorkoutPlanToStart) => {
+    if (isLoadingInterruptedSession) {
+      return;
+    }
+
+    if (interruptedSession) {
+      window.alert(
+        "Une seance est deja en cours. Reprends-la ou annule-la avant d en demarrer une autre.",
+      );
+      setCurrentScreen("home");
+      return;
+    }
+
     setIsQuickAddOpen(false);
     setIsSessionConfigOpen(false);
     setSessionCreateError(null);
-    setCurrentScreen("workout");
-    setActivePlan(plan);
+    setActivePlan({
+      plan,
+      initialState: null,
+    });
   };
 
-  const handleCloseActivePlan = () => {
+  const handleResumeInterruptedSession = () => {
+    if (!interruptedSession) {
+      return;
+    }
+
+    setActivePlan({
+      plan: interruptedSession.plan,
+      initialState: interruptedSession.initialState,
+    });
+  };
+
+  const handleCloseActivePlan = (reason?: ActiveSessionCloseReason) => {
     setActivePlan(null);
-    setCurrentScreen("workout");
+
+    if (reason === "suspended") {
+      setCurrentScreen("home");
+    }
+
+    void refreshInterruptedSession();
   };
 
   const handleSessionPersisted = () => {
@@ -310,7 +624,10 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
         onSignOut,
         onCreateSession: handleCreateSession,
         onStartPlan: handleStartPlan,
+        onResumeInterruptedSession: handleResumeInterruptedSession,
         onEditPlan: handleEditPlan,
+        interruptedSession: interruptedSession?.summary ?? null,
+        isLoadingInterruptedSession,
         workoutRefreshKey,
       })}
 
@@ -399,7 +716,8 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
       {activePlan ? (
         <ActiveSessionScreen
           userId={user.uid}
-          plan={activePlan}
+          plan={activePlan.plan}
+          initialState={activePlan.initialState}
           onClose={handleCloseActivePlan}
           onSessionPersisted={handleSessionPersisted}
         />

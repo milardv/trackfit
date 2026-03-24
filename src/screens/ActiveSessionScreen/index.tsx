@@ -10,6 +10,7 @@ import {
 } from "../ExerciseConfigScreen/index.tsx";
 import {
   addSessionExercise,
+  activateSessionExercise,
   createExercise,
   clearRestTimer,
   deleteSessionExercise,
@@ -131,13 +132,20 @@ async function playCountdownDoneSound(
 export function ActiveSessionScreen({
   userId,
   plan,
+  initialState,
   onClose,
   onSessionPersisted,
 }: ActiveSessionScreenProps) {
-  const [view, setView] = useState<SessionView>("exercise_list");
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [activeExerciseKey, setActiveExerciseKey] = useState<string | null>(null);
-  const [restEndsAtMs, setRestEndsAtMs] = useState<number | null>(null);
+  const [view, setView] = useState<SessionView>(
+    initialState?.activeExerciseKey ? "exercise_active" : "exercise_list",
+  );
+  const [sessionId, setSessionId] = useState<string | null>(initialState?.sessionId ?? null);
+  const [activeExerciseKey, setActiveExerciseKey] = useState<string | null>(
+    initialState?.activeExerciseKey ?? null,
+  );
+  const [restEndsAtMs, setRestEndsAtMs] = useState<number | null>(
+    initialState?.restEndsAtMs ?? null,
+  );
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [isBusy, setIsBusy] = useState(false);
   const [isFinalizingSession, setIsFinalizingSession] = useState(false);
@@ -174,8 +182,12 @@ export function ActiveSessionScreen({
   const durationCountdownSoundSetKeyRef = useRef<string | null>(null);
   const restCountdownSoundEndAtMsRef = useRef<number | null>(null);
 
-  const [exercises, setExercises] = useState<RuntimeExercise[]>(() =>
-    plan.exercises
+  const [exercises, setExercises] = useState<RuntimeExercise[]>(() => {
+    if (initialState?.exercises?.length) {
+      return initialState.exercises.slice().sort((a, b) => a.order - b.order);
+    }
+
+    return plan.exercises
       .slice()
       .sort((a, b) => a.order - b.order)
       .map((exercise) => ({
@@ -184,8 +196,8 @@ export function ActiveSessionScreen({
         sessionExerciseId: null,
         startedAtMs: null,
         loggedSets: [],
-      })),
-  );
+      }));
+  });
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -298,6 +310,12 @@ export function ActiveSessionScreen({
     () => exercises.find((exercise) => exercise.key === activeExerciseKey) ?? null,
     [activeExerciseKey, exercises],
   );
+
+  useEffect(() => {
+    if (view === "exercise_active" && !activeExercise) {
+      setView("exercise_list");
+    }
+  }, [activeExercise, view]);
 
   const completedCount = useMemo(
     () => exercises.filter((exercise) => exercise.status === "completed").length,
@@ -899,19 +917,42 @@ export function ActiveSessionScreen({
     }
 
     if (exercise.sessionExerciseId) {
-      setExercises((previous) =>
-        previous.map((item) =>
-          item.key === exerciseKey
-            ? {
-                ...item,
-                status: "in_progress",
-                startedAtMs: item.startedAtMs ?? Date.now(),
-              }
-            : item,
-        ),
-      );
-      setActiveExerciseKey(exerciseKey);
-      setView("exercise_active");
+      if (!sessionId) {
+        return;
+      }
+
+      setIsBusy(true);
+      setErrorMessage(null);
+
+      try {
+        await activateSessionExercise(
+          userId,
+          sessionId,
+          exercise.sessionExerciseId,
+          exercise.loggedSets.length + 1,
+        );
+
+        setExercises((previous) =>
+          previous.map((item) =>
+            item.key === exerciseKey
+              ? {
+                  ...item,
+                  status: "in_progress",
+                  startedAtMs: item.startedAtMs ?? Date.now(),
+                }
+              : item,
+          ),
+        );
+        setActiveExerciseKey(exerciseKey);
+        setRestEndsAtMs(null);
+        setView("exercise_active");
+      } catch {
+        setErrorMessage(
+          "Impossible de reprendre cet exercice pour le moment. Reessaie dans un instant.",
+        );
+      } finally {
+        setIsBusy(false);
+      }
       return;
     }
 
@@ -1142,7 +1183,7 @@ export function ActiveSessionScreen({
 
   const handleCancelSession = async () => {
     if (!sessionId) {
-      onClose();
+      onClose("dismissed");
       return;
     }
 
@@ -1166,12 +1207,28 @@ export function ActiveSessionScreen({
 
       await endSession(userId, sessionId, "cancelled");
       onSessionPersisted?.();
-      onClose();
+      onClose("cancelled");
     } catch {
       setErrorMessage("Impossible d annuler la seance pour le moment.");
     } finally {
       setIsBusy(false);
     }
+  };
+
+  const handleSuspendSession = () => {
+    if (!sessionId) {
+      onClose("dismissed");
+      return;
+    }
+
+    const shouldSuspend = window.confirm(
+      "Quitter cette seance ? Tu pourras la reprendre plus tard depuis l accueil.",
+    );
+    if (!shouldSuspend) {
+      return;
+    }
+
+    onClose("suspended");
   };
 
   const handleBackAction = () => {
@@ -1196,11 +1253,11 @@ export function ActiveSessionScreen({
     }
 
     if (view === "session_done") {
-      onClose();
+      onClose("completed");
       return;
     }
 
-    void handleCancelSession();
+    handleSuspendSession();
   };
 
   const handleCloseAction = () => {
@@ -1210,11 +1267,11 @@ export function ActiveSessionScreen({
     }
 
     if (view === "session_done" || !sessionId) {
-      onClose();
+      onClose(view === "session_done" ? "completed" : "dismissed");
       return;
     }
 
-    void handleCancelSession();
+    handleSuspendSession();
   };
 
   return (
@@ -1243,6 +1300,9 @@ export function ActiveSessionScreen({
             void handleStartExercise(exerciseKey);
           }}
           onEditExercise={openExerciseEditor}
+          onCancelSession={() => {
+            void handleCancelSession();
+          }}
           onFinalizeSession={() => {
             void finalizeSession();
           }}
@@ -1279,7 +1339,12 @@ export function ActiveSessionScreen({
       ) : null}
 
       {view === "session_done" ? (
-        <SessionDoneView completedCount={completedCount} onClose={onClose} />
+        <SessionDoneView
+          completedCount={completedCount}
+          onClose={() => {
+            onClose("completed");
+          }}
+        />
       ) : null}
 
       {isExercisePickerOpen ? (

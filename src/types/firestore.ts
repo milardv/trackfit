@@ -256,6 +256,11 @@ export interface ProgressPhotoDoc extends TimestampedDoc {
   sourcePhotoIds?: string[] | null;
 }
 
+export interface PhotoPrivacySettingsDoc extends TimestampedDoc {
+  isEnabled: boolean;
+  credentialIds: string[];
+}
+
 export interface ExerciseStatsDoc {
   bestWeightKg: number;
   bestVolumeKg: number;

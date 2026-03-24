@@ -252,8 +252,12 @@ export function HomeScreen({
   userId,
   displayName,
   photoURL,
+  interruptedSession,
+  isLoadingInterruptedSession = false,
   onCreateSession,
   onStartPlan,
+  onResumeInterruptedSession,
+  refreshKey = 0,
 }: HomeScreenProps) {
   const [todaysPlan, setTodaysPlan] = useState<HomePlanCard | null>(null);
   const [isLoadingPlan, setIsLoadingPlan] = useState(true);
@@ -392,7 +396,7 @@ export function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [refreshKey, userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -491,7 +495,7 @@ export function HomeScreen({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [refreshKey, userId]);
 
   const appendDraftExercise = (exercise: SessionEditDraftExercise) => {
     setSessionEditDraft((current) => {
@@ -1040,6 +1044,52 @@ export function HomeScreen({
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold text-white">Séance du jour</h2>
         </div>
+
+        {isLoadingInterruptedSession ? (
+          <div className="rounded-2xl border border-white/5 bg-card-dark p-5 text-sm text-slate-400">
+            Recherche de votre seance interrompue...
+          </div>
+        ) : null}
+
+        {interruptedSession ? (
+          <div className="relative overflow-hidden rounded-3xl border border-primary/20 bg-[radial-gradient(circle_at_top_right,rgba(34,197,94,0.18),transparent_42%),linear-gradient(135deg,#15261c_0%,#0f1813_100%)] p-6 shadow-[0_24px_80px_-40px_rgba(34,197,94,0.45)]">
+            <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-primary/10 blur-3xl" />
+            <div className="relative flex flex-col gap-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.24em] text-primary/90">
+                    Seance interrompue
+                  </p>
+                  <h3 className="mt-2 text-xl font-black text-white">
+                    {interruptedSession.name}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-300">
+                    {interruptedSession.gymName} · lancee le{" "}
+                    {formatSessionDateTime(interruptedSession.startedAtMs)}
+                  </p>
+                </div>
+                <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+                  {interruptedSession.completedCount}/{interruptedSession.totalCount}
+                </span>
+              </div>
+
+              <p className="text-sm text-slate-300">
+                {interruptedSession.activeExerciseName
+                  ? `Exercice en cours: ${interruptedSession.activeExerciseName}`
+                  : "Tu peux reprendre exactement la ou tu t es arrete."}
+              </p>
+
+              <button
+                type="button"
+                onClick={onResumeInterruptedSession}
+                className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-primary px-4 font-bold text-slate-950 transition-transform duration-200 hover:scale-[1.01]"
+              >
+                <span className="material-symbols-outlined">play_circle</span>
+                Reprendre la seance
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {isLoadingPlan ? (
           <div className="rounded-2xl border border-white/5 bg-card-dark p-5 text-sm text-slate-400">

@@ -4,15 +4,24 @@ import { getDownloadURL, ref as storageRef } from "firebase/storage";
 import { storage } from "../../firebase.ts";
 import {
   addProgressPhoto,
+  disablePhotoPrivacy,
   deleteProgressPhoto,
+  enablePhotoPrivacyForCredential,
+  getPhotoPrivacySettings,
   listBodyMetrics,
   listProgressPhotos,
   listSessions,
 } from "../../services/firestoreService.ts";
 import {
+  buildBlurredCloudinaryPreviewUrl,
   generateFadeVideoFromCloudinaryPhotos,
   uploadToCloudinary,
 } from "../../services/imageUploadService.ts";
+import {
+  isPlatformPhotoPrivacyAvailable,
+  registerPhotoPrivacyCredential,
+  verifyPhotoPrivacyUnlock,
+} from "../../services/photoPrivacyWebAuthn.ts";
 import type {
   BodyMetricEntry,
   PeriodOption,
@@ -58,6 +67,26 @@ async function resolveProgressPhotoPreviewUrl(photo: {
   return resolveStorageLikeUrl(photo.thumbnailPath ?? photo.storagePath);
 }
 
+function resolveLockedProgressPhotoPreviewUrl(photo: {
+  storagePath: string;
+  thumbnailPath: string | null;
+}): string | null {
+  return buildBlurredCloudinaryPreviewUrl(photo.thumbnailPath ?? photo.storagePath);
+}
+
+async function hydrateProgressPhotoEntries<T extends {
+  storagePath: string;
+  thumbnailPath: string | null;
+}>(entries: T[]): Promise<Array<T & Pick<ProgressPhotoEntry, "previewUrl" | "mediaUrl">>> {
+  return Promise.all(
+    entries.map(async (photo) => ({
+      ...photo,
+      previewUrl: await resolveProgressPhotoPreviewUrl(photo),
+      mediaUrl: await resolveStorageLikeUrl(photo.storagePath),
+    })),
+  );
+}
+
 function getDefaultProfilePhoto(displayName: string): string {
   const name = encodeURIComponent(displayName.trim() || "TrackFit");
   return `https://ui-avatars.com/api/?name=${name}&background=13ec5b&color=102216&bold=true`;
@@ -79,12 +108,62 @@ export function ProgressScreen({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [photoUploadSuccess, setPhotoUploadSuccess] = useState<string | null>(null);
+  const [photoPrivacyError, setPhotoPrivacyError] = useState<string | null>(null);
+  const [photoPrivacySuccess, setPhotoPrivacySuccess] = useState<string | null>(null);
+  const [isPhotoPrivacyEnabled, setIsPhotoPrivacyEnabled] = useState(false);
+  const [photoPrivacyCredentialIds, setPhotoPrivacyCredentialIds] = useState<string[]>([]);
+  const [isPhotoPrivacySupported, setIsPhotoPrivacySupported] = useState(false);
+  const [isPhotoPrivacyBusy, setIsPhotoPrivacyBusy] = useState(false);
+  const [isPhotoPrivacyUnlocked, setIsPhotoPrivacyUnlocked] = useState(true);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetricEntry[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [photos, setPhotos] = useState<ProgressPhotoEntry[]>([]);
   const importPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const cameraPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const resolvedDisplayName = displayName.trim() || "Membre TrackFit";
+  const resolvedEmail = email.trim() || "email non renseigne";
+  const resolvedPhoto =
+    photoURL && photoURL.trim() ? photoURL : getDefaultProfilePhoto(resolvedDisplayName);
+  const canViewProtectedPhotos = !isPhotoPrivacyEnabled || isPhotoPrivacyUnlocked;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPhotoPrivacy = async () => {
+      try {
+        const [settings, isSupported] = await Promise.all([
+          getPhotoPrivacySettings(userId),
+          isPlatformPhotoPrivacyAvailable().catch(() => false),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const credentialIds = settings?.credentialIds ?? [];
+        const isEnabled = settings?.isEnabled === true && credentialIds.length > 0;
+
+        setIsPhotoPrivacySupported(isSupported);
+        setPhotoPrivacyCredentialIds(credentialIds);
+        setIsPhotoPrivacyEnabled(isEnabled);
+        setIsPhotoPrivacyUnlocked(!isEnabled);
+      } catch {
+        if (!cancelled) {
+          setPhotoPrivacyError("Impossible de charger le verrouillage des photos.");
+          setIsPhotoPrivacyEnabled(false);
+          setPhotoPrivacyCredentialIds([]);
+          setIsPhotoPrivacyUnlocked(true);
+        }
+      }
+    };
+
+    void loadPhotoPrivacy();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,13 +189,13 @@ export function ProgressScreen({
           .slice()
           .sort((a, b) => toMillis(b.takenAt) - toMillis(a.takenAt));
 
-        const hydratedPhotos = await Promise.all(
-          sortedPhotos.map(async (photo) => ({
-            ...photo,
-            previewUrl: await resolveProgressPhotoPreviewUrl(photo),
-            mediaUrl: await resolveStorageLikeUrl(photo.storagePath),
-          })),
-        );
+        const hydratedPhotos = canViewProtectedPhotos
+          ? await hydrateProgressPhotoEntries(sortedPhotos)
+          : sortedPhotos.map((photo) => ({
+              ...photo,
+              previewUrl: resolveLockedProgressPhotoPreviewUrl(photo),
+              mediaUrl: null,
+            }));
 
         if (!cancelled) {
           setBodyMetrics(sortedMetrics);
@@ -139,7 +218,7 @@ export function ProgressScreen({
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [canViewProtectedPhotos, userId]);
 
   const summary = useMemo(() => computeWeightSummary(bodyMetrics), [bodyMetrics]);
   const latestBodyMetric = useMemo(() => bodyMetrics[0] ?? null, [bodyMetrics]);
@@ -153,10 +232,31 @@ export function ProgressScreen({
     [chartPoints],
   );
 
-  const resolvedDisplayName = displayName.trim() || "Membre TrackFit";
-  const resolvedEmail = email.trim() || "email non renseigne";
-  const resolvedPhoto =
-    photoURL && photoURL.trim() ? photoURL : getDefaultProfilePhoto(resolvedDisplayName);
+  useEffect(() => {
+    if (canViewProtectedPhotos) {
+      return;
+    }
+
+    setIsGalleryOpen(false);
+  }, [canViewProtectedPhotos]);
+
+  useEffect(() => {
+    if (!isPhotoPrivacyEnabled || !isPhotoPrivacyUnlocked) {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        setIsPhotoPrivacyUnlocked(false);
+        setIsGalleryOpen(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isPhotoPrivacyEnabled, isPhotoPrivacyUnlocked]);
 
   const handleSignOut = async () => {
     if (isSigningOut) {
@@ -168,6 +268,110 @@ export function ProgressScreen({
       await onSignOut();
     } finally {
       setIsSigningOut(false);
+    }
+  };
+
+  const handleEnablePhotoPrivacy = async () => {
+    if (isPhotoPrivacyBusy) {
+      return;
+    }
+
+    setIsPhotoPrivacyBusy(true);
+    setPhotoPrivacyError(null);
+    setPhotoPrivacySuccess(null);
+
+    try {
+      const registration = await registerPhotoPrivacyCredential(
+        userId,
+        resolvedDisplayName,
+        photoPrivacyCredentialIds,
+      );
+      const settings = await enablePhotoPrivacyForCredential(
+        userId,
+        registration.credentialId,
+      );
+
+      setIsPhotoPrivacyEnabled(settings.isEnabled);
+      setPhotoPrivacyCredentialIds(settings.credentialIds);
+      setIsPhotoPrivacyUnlocked(true);
+      setPhotoPrivacySuccess(
+        settings.credentialIds.length > 1
+          ? `Appareil ${registration.label} ajoute pour deverrouiller les photos.`
+          : `Verrouillage active sur ${registration.label}.`,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Impossible d activer le verrouillage des photos.";
+      setPhotoPrivacyError(message);
+    } finally {
+      setIsPhotoPrivacyBusy(false);
+    }
+  };
+
+  const handleUnlockPhotos = async () => {
+    if (isPhotoPrivacyBusy) {
+      return;
+    }
+
+    setIsPhotoPrivacyBusy(true);
+    setPhotoPrivacyError(null);
+    setPhotoPrivacySuccess(null);
+
+    try {
+      await verifyPhotoPrivacyUnlock(photoPrivacyCredentialIds);
+      const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
+      setPhotos(hydratedPhotos);
+      setIsPhotoPrivacyUnlocked(true);
+      setPhotoPrivacySuccess("Photos deverrouillees sur cet appareil.");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Impossible de deverrouiller les photos.";
+      setPhotoPrivacyError(message);
+    } finally {
+      setIsPhotoPrivacyBusy(false);
+    }
+  };
+
+  const handleLockPhotos = () => {
+    setPhotoPrivacyError(null);
+    setPhotoPrivacySuccess("Photos reverrouillees.");
+    setIsPhotoPrivacyUnlocked(false);
+    setIsGalleryOpen(false);
+  };
+
+  const handleDisablePhotoPrivacy = async () => {
+    if (isPhotoPrivacyBusy) {
+      return;
+    }
+
+    const shouldDisable = window.confirm(
+      "Desactiver le verrouillage biométrique des photos sur ce compte ?",
+    );
+    if (!shouldDisable) {
+      return;
+    }
+
+    setIsPhotoPrivacyBusy(true);
+    setPhotoPrivacyError(null);
+    setPhotoPrivacySuccess(null);
+
+    try {
+      await disablePhotoPrivacy(userId);
+      const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
+      setPhotos(hydratedPhotos);
+      setIsPhotoPrivacyEnabled(false);
+      setPhotoPrivacyCredentialIds([]);
+      setIsPhotoPrivacyUnlocked(true);
+      setPhotoPrivacySuccess("Verrouillage des photos desactive.");
+      setIsGalleryOpen(true);
+    } catch {
+      setPhotoPrivacyError("Impossible de desactiver le verrouillage des photos.");
+    } finally {
+      setIsPhotoPrivacyBusy(false);
     }
   };
 
@@ -244,8 +448,10 @@ export function ProgressScreen({
         sourcePhotoIds: null,
         createdAt: takenAt,
         updatedAt: takenAt,
-        previewUrl: uploaded.thumbnailUrl ?? uploaded.imageUrl,
-        mediaUrl: uploaded.imageUrl,
+        previewUrl: canViewProtectedPhotos
+          ? (uploaded.thumbnailUrl ?? uploaded.imageUrl)
+          : buildBlurredCloudinaryPreviewUrl(uploaded.thumbnailUrl ?? uploaded.imageUrl),
+        mediaUrl: canViewProtectedPhotos ? uploaded.imageUrl : null,
       };
 
       setPhotos((current) =>
@@ -300,6 +506,12 @@ export function ProgressScreen({
       return;
     }
 
+    if (!canViewProtectedPhotos) {
+      setPhotoUploadError("Deverrouille les photos pour generer un fondu.");
+      setPhotoUploadSuccess(null);
+      return;
+    }
+
     const selectedPhotos = photos
       .filter((photo) => photoIds.includes(photo.id))
       .filter((photo) => resolveProgressPhotoMediaType(photo) === "image")
@@ -349,8 +561,10 @@ export function ProgressScreen({
         sourcePhotoIds: selectedPhotos.map((photo) => photo.id),
         createdAt: takenAt,
         updatedAt: takenAt,
-        previewUrl: fadeResult.thumbnailUrl ?? fadeResult.videoUrl,
-        mediaUrl: fadeResult.videoUrl,
+        previewUrl: canViewProtectedPhotos
+          ? (fadeResult.thumbnailUrl ?? fadeResult.videoUrl)
+          : buildBlurredCloudinaryPreviewUrl(fadeResult.thumbnailUrl ?? fadeResult.videoUrl),
+        mediaUrl: canViewProtectedPhotos ? fadeResult.videoUrl : null,
       };
 
       setPhotos((current) =>
@@ -439,10 +653,7 @@ export function ProgressScreen({
                   isSigningOut={isSigningOut}
                 />
 
-                <FriendsSection
-                  userId={userId}
-                  displayName={resolvedDisplayName}
-                />
+                <FriendsSection userId={userId} />
 
                 <BodyCompositionCards summary={summary} />
 
@@ -458,10 +669,26 @@ export function ProgressScreen({
                 <ProgressPhotosSection
                   photos={photos}
                   currentWeightKg={summary.currentWeightKg}
+                  photoPrivacyEnabled={isPhotoPrivacyEnabled}
+                  isPhotoPrivacyUnlocked={isPhotoPrivacyUnlocked}
+                  isPhotoPrivacySupported={isPhotoPrivacySupported}
+                  isPhotoPrivacyBusy={isPhotoPrivacyBusy}
+                  privacyError={photoPrivacyError}
+                  privacySuccess={photoPrivacySuccess}
                   isUploadingPhoto={isUploadingPhoto}
                   deletingPhotoId={deletingPhotoId}
                   uploadError={photoUploadError}
                   uploadSuccess={photoUploadSuccess}
+                  onEnableProtection={() => {
+                    void handleEnablePhotoPrivacy();
+                  }}
+                  onUnlockPhotos={() => {
+                    void handleUnlockPhotos();
+                  }}
+                  onLockPhotos={handleLockPhotos}
+                  onDisableProtection={() => {
+                    void handleDisablePhotoPrivacy();
+                  }}
                   onImportPhoto={handleOpenImportPicker}
                   onTakePhoto={handleOpenCameraPicker}
                   onOpenGallery={() => setIsGalleryOpen(true)}
