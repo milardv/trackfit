@@ -1,4 +1,4 @@
-const CACHE_NAME = "trackfit-shell-v1";
+const CACHE_NAME = "trackfit-shell-v2";
 const CACHE_PREFIX = "trackfit-shell-";
 const APP_SHELL_PATHS = [
   "./",
@@ -72,6 +72,22 @@ async function staleWhileRevalidate(request) {
   return cached || await networkResponsePromise || Response.error();
 }
 
+function shouldUseNetworkFirst(request, url) {
+  if (request.mode === "navigate") {
+    return true;
+  }
+
+  if (
+    request.destination === "script"
+    || request.destination === "style"
+    || request.destination === "manifest"
+  ) {
+    return true;
+  }
+
+  return url.pathname.includes("/assets/");
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
 
@@ -84,7 +100,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (request.mode === "navigate") {
+  if (shouldUseNetworkFirst(request, url)) {
     event.respondWith(networkFirst(request));
     return;
   }
