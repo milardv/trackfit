@@ -133,11 +133,15 @@ export async function registerPhotoPrivacyCredential(
   userId: string,
   displayName: string,
   existingCredentialIds: string[] = [],
+  options?: {
+    excludeExistingCredentials?: boolean;
+  },
 ): Promise<{ credentialId: string; label: string }> {
   ensureWebAuthnAvailable();
 
   const challenge = createChallenge();
   const expectedChallenge = toBase64Url(challenge);
+  const shouldExcludeExistingCredentials = options?.excludeExistingCredentials !== false;
   let credential: Credential | null;
   try {
     credential = await navigator.credentials.create({
@@ -160,10 +164,12 @@ export async function registerPhotoPrivacyCredential(
         },
         timeout: 60_000,
         attestation: "none",
-        excludeCredentials: existingCredentialIds.map((credentialId) => ({
-          type: "public-key" as const,
-          id: fromBase64Url(credentialId),
-        })),
+        excludeCredentials: shouldExcludeExistingCredentials
+          ? existingCredentialIds.map((credentialId) => ({
+              type: "public-key" as const,
+              id: fromBase64Url(credentialId),
+            }))
+          : [],
       },
     });
   } catch (error) {

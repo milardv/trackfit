@@ -271,11 +271,16 @@ export function ProgressScreen({
     }
   };
 
-  const registerPhotoPrivacyOnCurrentDevice = async () => {
+  const registerPhotoPrivacyOnCurrentDevice = async (
+    options?: {
+      excludeExistingCredentials?: boolean;
+    },
+  ) => {
     const registration = await registerPhotoPrivacyCredential(
       userId,
       resolvedDisplayName,
       photoPrivacyCredentialIds,
+      options,
     );
     const settings = await enablePhotoPrivacyForCredential(
       userId,
@@ -326,7 +331,9 @@ export function ProgressScreen({
     setPhotoPrivacySuccess(null);
 
     try {
-      await registerPhotoPrivacyOnCurrentDevice();
+      await registerPhotoPrivacyOnCurrentDevice({
+        excludeExistingCredentials: false,
+      });
     } catch (error) {
       const message =
         error instanceof Error && error.message
