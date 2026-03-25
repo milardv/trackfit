@@ -16,8 +16,8 @@ export function ProgressPhotosSection({
   photos,
   currentWeightKg,
   photoPrivacyEnabled,
+  photoPrivacySetupRequired,
   isPhotoPrivacyUnlocked,
-  isPhotoPrivacySupported,
   isPhotoPrivacyBusy,
   privacyError,
   privacySuccess,
@@ -26,7 +26,6 @@ export function ProgressPhotosSection({
   uploadError,
   uploadSuccess,
   onEnableProtection,
-  onAddCurrentDevice,
   onUnlockPhotos,
   onLockPhotos,
   onDisableProtection,
@@ -42,8 +41,14 @@ export function ProgressPhotosSection({
   const visiblePhotos = photos.slice(0, 6);
   const comparePhotos = useMemo(() => photos.slice(0, 2), [photos]);
   const isFullscreenOpen = fullscreenPhotoUrl !== null;
-  const canViewPhotos = !photoPrivacyEnabled || isPhotoPrivacyUnlocked;
-  const galleryActionLabel = canViewPhotos ? "Galerie" : "Deverrouiller la galerie";
+  const canViewPhotos = photoPrivacySetupRequired
+    ? false
+    : !photoPrivacyEnabled || isPhotoPrivacyUnlocked;
+  const galleryActionLabel = photoPrivacySetupRequired
+    ? "Configurer le code"
+    : canViewPhotos
+    ? "Galerie"
+    : "Entrer le code";
 
   useEffect(() => {
     if (!isFullscreenOpen) {
@@ -130,39 +135,49 @@ export function ProgressPhotosSection({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3">
                   <div className={`flex h-11 w-11 items-center justify-center rounded-full ${
-                    photoPrivacyEnabled
+                    photoPrivacySetupRequired
+                      ? "bg-amber-500/15 text-amber-300"
+                      : photoPrivacyEnabled
                       ? isPhotoPrivacyUnlocked
                         ? "bg-emerald-500/15 text-emerald-300"
                         : "bg-amber-500/15 text-amber-300"
                       : "bg-primary/10 text-primary"
                   }`}>
                     <span className="material-symbols-outlined">
-                      {photoPrivacyEnabled
+                      {photoPrivacySetupRequired
+                        ? "pin"
+                        : photoPrivacyEnabled
                         ? isPhotoPrivacyUnlocked
                           ? "lock_open"
                           : "lock"
-                        : "fingerprint"}
+                        : "pin"}
                     </span>
                   </div>
                   <div>
                     <p className="text-sm font-bold text-white">
-                      {photoPrivacyEnabled
+                      {photoPrivacySetupRequired
+                        ? "Code requis"
+                        : photoPrivacyEnabled
                         ? isPhotoPrivacyUnlocked
                           ? "Photos deverrouillees"
                           : "Photos verrouillees"
-                        : "Protection biométrique inactive"}
+                        : "Code PIN inactif"}
                     </p>
                     <p className="mt-1 text-xs text-slate-400">
-                      {photoPrivacyEnabled
+                      {photoPrivacySetupRequired
+                        ? "Au premier acces, cree un code a 4 chiffres pour deverrouiller la galerie."
+                        : photoPrivacyEnabled
                         ? isPhotoPrivacyUnlocked
                           ? "La galerie reste ouverte jusqu a verrouillage manuel ou changement d onglet."
-                          : "Deverrouille avec Face ID, Touch ID, Windows Hello ou le verrou local de l appareil."
-                        : "Ajoute un verrou local pour masquer la consultation des photos sur cet appareil."}
+                          : "Entre ton code a 4 chiffres pour afficher les photos."
+                        : "Cree un code a 4 chiffres pour proteger la consultation des photos."}
                     </p>
                   </div>
                 </div>
                 <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
-                  {photoPrivacyEnabled
+                  {photoPrivacySetupRequired
+                    ? "A configurer"
+                    : photoPrivacyEnabled
                     ? isPhotoPrivacyUnlocked
                       ? "Actif"
                       : "Verrouille"
@@ -175,11 +190,11 @@ export function ProgressPhotosSection({
                   <button
                     type="button"
                     onClick={onEnableProtection}
-                    disabled={isPhotoPrivacyBusy || !isPhotoPrivacySupported}
+                    disabled={isPhotoPrivacyBusy}
                     className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-background-dark transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <span className="material-symbols-outlined text-lg">fingerprint</span>
-                    Activer
+                    <span className="material-symbols-outlined text-lg">pin</span>
+                    {photoPrivacySetupRequired ? "Creer mon code" : "Creer un code"}
                   </button>
                 ) : null}
 
@@ -191,23 +206,21 @@ export function ProgressPhotosSection({
                     className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-background-dark transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <span className="material-symbols-outlined text-lg">
-                      {isPhotoPrivacyBusy ? "progress_activity" : "lock_open"}
+                      {isPhotoPrivacyBusy ? "progress_activity" : "pin"}
                     </span>
-                    Deverrouiller
+                    Entrer le code
                   </button>
                 ) : null}
 
-                {photoPrivacyEnabled ? (
+                {photoPrivacyEnabled && isPhotoPrivacyUnlocked ? (
                   <button
                     type="button"
-                    onClick={isPhotoPrivacyUnlocked ? onLockPhotos : onAddCurrentDevice}
-                    disabled={isPhotoPrivacyBusy || (!isPhotoPrivacyUnlocked && !isPhotoPrivacySupported)}
+                    onClick={onLockPhotos}
+                    disabled={isPhotoPrivacyBusy}
                     className="flex h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-bold text-white transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <span className="material-symbols-outlined text-lg">
-                      {isPhotoPrivacyUnlocked ? "lock" : "add_moderator"}
-                    </span>
-                    {isPhotoPrivacyUnlocked ? "Verrouiller" : "Ajouter cet appareil"}
+                    <span className="material-symbols-outlined text-lg">lock</span>
+                    Verrouiller
                   </button>
                 ) : null}
 
@@ -223,12 +236,6 @@ export function ProgressPhotosSection({
                   </button>
                 ) : null}
               </div>
-
-              {!isPhotoPrivacySupported ? (
-                <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                  WebAuthn avec authenticator de plateforme n est pas disponible sur ce navigateur.
-                </p>
-              ) : null}
 
               {privacyError ? (
                 <p className="mt-3 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">

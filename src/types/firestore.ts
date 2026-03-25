@@ -258,7 +258,8 @@ export interface ProgressPhotoDoc extends TimestampedDoc {
 
 export interface PhotoPrivacySettingsDoc extends TimestampedDoc {
   isEnabled: boolean;
-  credentialIds: string[];
+  pinHash: string | null;
+  pinSalt: string | null;
 }
 
 export interface ExerciseStatsDoc {

@@ -143,7 +143,9 @@ export interface PublicUserProfile {
 
 export interface PhotoPrivacySettingsRecord {
   isEnabled: boolean;
-  credentialIds: string[];
+  hasPin: boolean;
+  pinHash: string | null;
+  pinSalt: string | null;
 }
 
 export interface FriendRequestRecord {
@@ -1757,31 +1759,35 @@ export async function getPhotoPrivacySettings(
   }
 
   const settings = snapshot.data() as Partial<PhotoPrivacySettingsDoc>;
+  const pinHash = typeof settings.pinHash === "string" && settings.pinHash.length > 0
+    ? settings.pinHash
+    : null;
+  const pinSalt = typeof settings.pinSalt === "string" && settings.pinSalt.length > 0
+    ? settings.pinSalt
+    : null;
+
   return {
-    isEnabled: settings.isEnabled === true,
-    credentialIds: Array.isArray(settings.credentialIds)
-      ? settings.credentialIds.filter((value): value is string => typeof value === "string" && value.length > 0)
-      : [],
+    isEnabled: settings.isEnabled === true && pinHash !== null && pinSalt !== null,
+    hasPin: pinHash !== null && pinSalt !== null,
+    pinHash,
+    pinSalt,
   };
 }
 
-export async function enablePhotoPrivacyForCredential(
+export async function setPhotoPrivacyPin(
   uid: string,
-  credentialId: string,
+  pinHash: string,
+  pinSalt: string,
 ): Promise<PhotoPrivacySettingsRecord> {
   const reference = photoPrivacySettingsDocRef(uid);
   const snapshot = await getDoc(reference);
-  const current = snapshot.exists()
-    ? ((snapshot.data() as Partial<PhotoPrivacySettingsDoc>).credentialIds ?? [])
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-    : [];
-  const nextCredentialIds = [...new Set([...current, credentialId])];
 
   await setDoc(
     reference,
     {
       isEnabled: true,
-      credentialIds: nextCredentialIds,
+      pinHash,
+      pinSalt,
       createdAt: snapshot.exists() ? snapshot.get("createdAt") ?? serverTimestamp() : serverTimestamp(),
       updatedAt: serverTimestamp(),
     } satisfies WithFieldValue<PhotoPrivacySettingsDoc>,
@@ -1790,7 +1796,9 @@ export async function enablePhotoPrivacyForCredential(
 
   return {
     isEnabled: true,
-    credentialIds: nextCredentialIds,
+    hasPin: true,
+    pinHash,
+    pinSalt,
   };
 }
 
@@ -1799,7 +1807,8 @@ export async function disablePhotoPrivacy(uid: string): Promise<void> {
     photoPrivacySettingsDocRef(uid),
     {
       isEnabled: false,
-      credentialIds: [],
+      pinHash: null,
+      pinSalt: null,
       updatedAt: serverTimestamp(),
     } satisfies PartialWithFieldValue<PhotoPrivacySettingsDoc>,
     { merge: true },

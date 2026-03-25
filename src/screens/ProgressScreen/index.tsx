@@ -6,11 +6,11 @@ import {
   addProgressPhoto,
   disablePhotoPrivacy,
   deleteProgressPhoto,
-  enablePhotoPrivacyForCredential,
   getPhotoPrivacySettings,
   listBodyMetrics,
   listProgressPhotos,
   listSessions,
+  setPhotoPrivacyPin,
 } from "../../services/firestoreService.ts";
 import {
   buildBlurredCloudinaryPreviewUrl,
@@ -18,10 +18,10 @@ import {
   uploadToCloudinary,
 } from "../../services/imageUploadService.ts";
 import {
-  isPlatformPhotoPrivacyAvailable,
-  registerPhotoPrivacyCredential,
-  verifyPhotoPrivacyUnlock,
-} from "../../services/photoPrivacyWebAuthn.ts";
+  createPhotoPrivacyPin,
+  isValidPhotoPrivacyPin,
+  verifyPhotoPrivacyPin,
+} from "../../services/photoPrivacyPin.ts";
 import type {
   BodyMetricEntry,
   PeriodOption,
@@ -40,9 +40,11 @@ import {
 import { BodyCompositionCards } from "./components/BodyCompositionCards.tsx";
 import { FriendsSection } from "./components/FriendsSection.tsx";
 import { PhotoGalleryScreen } from "./components/PhotoGalleryScreen.tsx";
+import { PhotoPrivacyPinModal } from "./components/PhotoPrivacyPinModal.tsx";
 import { ProfileIdentityCard } from "./components/ProfileIdentityCard.tsx";
 import { ProgressPhotosSection } from "./components/ProgressPhotosSection.tsx";
 import { WeightHistorySection } from "./components/WeightHistorySection.tsx";
+import type { PhotoPrivacyPinModalMode } from "./components/types.ts";
 
 async function resolveStorageLikeUrl(path: string | null | undefined): Promise<string | null> {
   if (!path) {
@@ -111,10 +113,16 @@ export function ProgressScreen({
   const [photoPrivacyError, setPhotoPrivacyError] = useState<string | null>(null);
   const [photoPrivacySuccess, setPhotoPrivacySuccess] = useState<string | null>(null);
   const [isPhotoPrivacyEnabled, setIsPhotoPrivacyEnabled] = useState(false);
-  const [photoPrivacyCredentialIds, setPhotoPrivacyCredentialIds] = useState<string[]>([]);
-  const [isPhotoPrivacySupported, setIsPhotoPrivacySupported] = useState(false);
+  const [isPhotoPrivacySetupRequired, setIsPhotoPrivacySetupRequired] = useState(true);
+  const [photoPrivacyPinHash, setPhotoPrivacyPinHash] = useState<string | null>(null);
+  const [photoPrivacyPinSalt, setPhotoPrivacyPinSalt] = useState<string | null>(null);
+  const [photoPrivacyPinModalMode, setPhotoPrivacyPinModalMode] =
+    useState<PhotoPrivacyPinModalMode | null>(null);
+  const [photoPrivacyPinDraft, setPhotoPrivacyPinDraft] = useState("");
+  const [photoPrivacyPinCandidate, setPhotoPrivacyPinCandidate] = useState<string | null>(null);
+  const [photoPrivacyPinModalError, setPhotoPrivacyPinModalError] = useState<string | null>(null);
   const [isPhotoPrivacyBusy, setIsPhotoPrivacyBusy] = useState(false);
-  const [isPhotoPrivacyUnlocked, setIsPhotoPrivacyUnlocked] = useState(true);
+  const [isPhotoPrivacyUnlocked, setIsPhotoPrivacyUnlocked] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetricEntry[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -125,35 +133,37 @@ export function ProgressScreen({
   const resolvedEmail = email.trim() || "email non renseigne";
   const resolvedPhoto =
     photoURL && photoURL.trim() ? photoURL : getDefaultProfilePhoto(resolvedDisplayName);
-  const canViewProtectedPhotos = !isPhotoPrivacyEnabled || isPhotoPrivacyUnlocked;
+  const canViewProtectedPhotos = isPhotoPrivacySetupRequired
+    ? false
+    : !isPhotoPrivacyEnabled || isPhotoPrivacyUnlocked;
 
   useEffect(() => {
     let cancelled = false;
 
     const loadPhotoPrivacy = async () => {
       try {
-        const [settings, isSupported] = await Promise.all([
-          getPhotoPrivacySettings(userId),
-          isPlatformPhotoPrivacyAvailable().catch(() => false),
-        ]);
+        const settings = await getPhotoPrivacySettings(userId);
 
         if (cancelled) {
           return;
         }
 
-        const credentialIds = settings?.credentialIds ?? [];
-        const isEnabled = settings?.isEnabled === true && credentialIds.length > 0;
+        const isFirstSetup = settings === null;
+        const isEnabled = settings?.isEnabled === true;
 
-        setIsPhotoPrivacySupported(isSupported);
-        setPhotoPrivacyCredentialIds(credentialIds);
         setIsPhotoPrivacyEnabled(isEnabled);
-        setIsPhotoPrivacyUnlocked(!isEnabled);
+        setIsPhotoPrivacySetupRequired(isFirstSetup);
+        setPhotoPrivacyPinHash(isEnabled ? settings?.pinHash ?? null : null);
+        setPhotoPrivacyPinSalt(isEnabled ? settings?.pinSalt ?? null : null);
+        setIsPhotoPrivacyUnlocked(!isFirstSetup && !isEnabled);
       } catch {
         if (!cancelled) {
           setPhotoPrivacyError("Impossible de charger le verrouillage des photos.");
           setIsPhotoPrivacyEnabled(false);
-          setPhotoPrivacyCredentialIds([]);
-          setIsPhotoPrivacyUnlocked(true);
+          setIsPhotoPrivacySetupRequired(true);
+          setPhotoPrivacyPinHash(null);
+          setPhotoPrivacyPinSalt(null);
+          setIsPhotoPrivacyUnlocked(false);
         }
       }
     };
@@ -258,6 +268,164 @@ export function ProgressScreen({
     };
   }, [isPhotoPrivacyEnabled, isPhotoPrivacyUnlocked]);
 
+  const resetPhotoPrivacyPinModal = () => {
+    setPhotoPrivacyPinModalMode(null);
+    setPhotoPrivacyPinDraft("");
+    setPhotoPrivacyPinCandidate(null);
+    setPhotoPrivacyPinModalError(null);
+  };
+
+  const handleClosePhotoPrivacyPinModal = () => {
+    if (isPhotoPrivacyBusy) {
+      return;
+    }
+
+    resetPhotoPrivacyPinModal();
+  };
+
+  const openPhotoPrivacyPinModal = (mode: PhotoPrivacyPinModalMode) => {
+    if (isPhotoPrivacyBusy) {
+      return;
+    }
+
+    setPhotoPrivacyError(null);
+    setPhotoPrivacySuccess(null);
+    setPhotoPrivacyPinDraft("");
+    setPhotoPrivacyPinCandidate(null);
+    setPhotoPrivacyPinModalError(null);
+    setPhotoPrivacyPinModalMode(mode);
+  };
+
+  const handlePhotoPrivacyPinDigit = (digit: string) => {
+    if (!photoPrivacyPinModalMode || isPhotoPrivacyBusy) {
+      return;
+    }
+
+    setPhotoPrivacyPinModalError(null);
+    setPhotoPrivacyPinDraft((current) => {
+      if (current.length >= 4) {
+        return current;
+      }
+
+      return `${current}${digit}`;
+    });
+  };
+
+  const handlePhotoPrivacyPinBackspace = () => {
+    if (!photoPrivacyPinModalMode || isPhotoPrivacyBusy) {
+      return;
+    }
+
+    setPhotoPrivacyPinModalError(null);
+    setPhotoPrivacyPinDraft((current) => current.slice(0, -1));
+  };
+
+  const handlePhotoPrivacyPinClear = () => {
+    if (!photoPrivacyPinModalMode || isPhotoPrivacyBusy) {
+      return;
+    }
+
+    setPhotoPrivacyPinModalError(null);
+    setPhotoPrivacyPinDraft("");
+  };
+
+  const handlePhotoPrivacyPinSubmit = async () => {
+    if (!photoPrivacyPinModalMode || isPhotoPrivacyBusy) {
+      return;
+    }
+
+    const pin = photoPrivacyPinDraft.trim();
+    if (!isValidPhotoPrivacyPin(pin)) {
+      setPhotoPrivacyPinModalError("Entre exactement 4 chiffres.");
+      return;
+    }
+
+    if (photoPrivacyPinModalMode === "create") {
+      setPhotoPrivacyPinCandidate(pin);
+      setPhotoPrivacyPinDraft("");
+      setPhotoPrivacyPinModalError(null);
+      setPhotoPrivacyPinModalMode("confirm");
+      return;
+    }
+
+    if (photoPrivacyPinModalMode === "confirm") {
+      if (!photoPrivacyPinCandidate || photoPrivacyPinCandidate !== pin) {
+        setPhotoPrivacyPinCandidate(null);
+        setPhotoPrivacyPinDraft("");
+        setPhotoPrivacyPinModalError("Les deux codes ne correspondent pas. Recommence.");
+        setPhotoPrivacyPinModalMode("create");
+        return;
+      }
+
+      setIsPhotoPrivacyBusy(true);
+      setPhotoPrivacyError(null);
+      setPhotoPrivacySuccess(null);
+
+      try {
+        const nextPin = await createPhotoPrivacyPin(pin);
+        const settings = await setPhotoPrivacyPin(userId, nextPin.pinHash, nextPin.pinSalt);
+        const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
+
+        setPhotos(hydratedPhotos);
+        setIsPhotoPrivacyEnabled(settings.isEnabled);
+        setIsPhotoPrivacySetupRequired(false);
+        setPhotoPrivacyPinHash(settings.pinHash);
+        setPhotoPrivacyPinSalt(settings.pinSalt);
+        setIsPhotoPrivacyUnlocked(true);
+        setPhotoPrivacySuccess("Code PIN active pour proteger les photos.");
+        resetPhotoPrivacyPinModal();
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : "Impossible de creer le code de deverrouillage.";
+        setPhotoPrivacyPinDraft("");
+        setPhotoPrivacyPinModalError(message);
+      } finally {
+        setIsPhotoPrivacyBusy(false);
+      }
+
+      return;
+    }
+
+    setIsPhotoPrivacyBusy(true);
+    setPhotoPrivacyError(null);
+    setPhotoPrivacySuccess(null);
+
+    try {
+      if (!photoPrivacyPinHash || !photoPrivacyPinSalt) {
+        setPhotoPrivacyPinModalError("Aucun code n est configure pour ce compte.");
+        return;
+      }
+
+      const isValidPin = await verifyPhotoPrivacyPin(
+        pin,
+        photoPrivacyPinSalt,
+        photoPrivacyPinHash,
+      );
+      if (!isValidPin) {
+        setPhotoPrivacyPinDraft("");
+        setPhotoPrivacyPinModalError("Code incorrect. Reessaie.");
+        return;
+      }
+
+      const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
+      setPhotos(hydratedPhotos);
+      setIsPhotoPrivacyUnlocked(true);
+      setPhotoPrivacySuccess("Photos deverrouillees.");
+      resetPhotoPrivacyPinModal();
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Impossible de verifier le code pour le moment.";
+      setPhotoPrivacyPinDraft("");
+      setPhotoPrivacyPinModalError(message);
+    } finally {
+      setIsPhotoPrivacyBusy(false);
+    }
+  };
+
   const handleSignOut = async () => {
     if (isSigningOut) {
       return;
@@ -271,108 +439,26 @@ export function ProgressScreen({
     }
   };
 
-  const registerPhotoPrivacyOnCurrentDevice = async (
-    options?: {
-      excludeExistingCredentials?: boolean;
-    },
-  ) => {
-    const registration = await registerPhotoPrivacyCredential(
-      userId,
-      resolvedDisplayName,
-      photoPrivacyCredentialIds,
-      options,
-    );
-    const settings = await enablePhotoPrivacyForCredential(
-      userId,
-      registration.credentialId,
-    );
-    const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
-
-    setPhotos(hydratedPhotos);
-    setIsPhotoPrivacyEnabled(settings.isEnabled);
-    setPhotoPrivacyCredentialIds(settings.credentialIds);
-    setIsPhotoPrivacyUnlocked(true);
-    setPhotoPrivacySuccess(
-      settings.credentialIds.length > 1
-        ? `Appareil ${registration.label} ajoute pour deverrouiller les photos.`
-        : `Verrouillage active sur ${registration.label}.`,
-    );
+  const handleEnablePhotoPrivacy = () => {
+    openPhotoPrivacyPinModal("create");
   };
 
-  const handleEnablePhotoPrivacy = async () => {
+  const handleUnlockPhotos = () => {
     if (isPhotoPrivacyBusy) {
       return;
     }
 
-    setIsPhotoPrivacyBusy(true);
-    setPhotoPrivacyError(null);
-    setPhotoPrivacySuccess(null);
-
-    try {
-      await registerPhotoPrivacyOnCurrentDevice();
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Impossible d activer le verrouillage des photos.";
-      setPhotoPrivacyError(message);
-    } finally {
-      setIsPhotoPrivacyBusy(false);
-    }
-  };
-
-  const handleAddPhotoPrivacyDevice = async () => {
-    if (isPhotoPrivacyBusy) {
+    if (
+      isPhotoPrivacySetupRequired ||
+      !isPhotoPrivacyEnabled ||
+      !photoPrivacyPinHash ||
+      !photoPrivacyPinSalt
+    ) {
+      openPhotoPrivacyPinModal("create");
       return;
     }
 
-    setIsPhotoPrivacyBusy(true);
-    setPhotoPrivacyError(null);
-    setPhotoPrivacySuccess(null);
-
-    try {
-      await registerPhotoPrivacyOnCurrentDevice({
-        excludeExistingCredentials: false,
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Impossible d ajouter cet appareil pour deverrouiller les photos.";
-      setPhotoPrivacyError(message);
-    } finally {
-      setIsPhotoPrivacyBusy(false);
-    }
-  };
-
-  const handleUnlockPhotos = async () => {
-    if (isPhotoPrivacyBusy) {
-      return;
-    }
-
-    setIsPhotoPrivacyBusy(true);
-    setPhotoPrivacyError(null);
-    setPhotoPrivacySuccess(null);
-
-    try {
-      const credentialId = await verifyPhotoPrivacyUnlock(photoPrivacyCredentialIds, userId);
-      if (!photoPrivacyCredentialIds.includes(credentialId)) {
-        const settings = await enablePhotoPrivacyForCredential(userId, credentialId);
-        setPhotoPrivacyCredentialIds(settings.credentialIds);
-      }
-      const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
-      setPhotos(hydratedPhotos);
-      setIsPhotoPrivacyUnlocked(true);
-      setPhotoPrivacySuccess("Photos deverrouillees sur cet appareil.");
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Impossible de deverrouiller les photos.";
-      setPhotoPrivacyError(message);
-    } finally {
-      setIsPhotoPrivacyBusy(false);
-    }
+    openPhotoPrivacyPinModal("unlock");
   };
 
   const handleLockPhotos = () => {
@@ -388,7 +474,7 @@ export function ProgressScreen({
     }
 
     const shouldDisable = window.confirm(
-      "Desactiver le verrouillage biométrique des photos sur ce compte ?",
+      "Desactiver le code PIN de protection des photos sur ce compte ?",
     );
     if (!shouldDisable) {
       return;
@@ -403,12 +489,15 @@ export function ProgressScreen({
       const hydratedPhotos = await hydrateProgressPhotoEntries(photos);
       setPhotos(hydratedPhotos);
       setIsPhotoPrivacyEnabled(false);
-      setPhotoPrivacyCredentialIds([]);
+      setIsPhotoPrivacySetupRequired(false);
+      setPhotoPrivacyPinHash(null);
+      setPhotoPrivacyPinSalt(null);
       setIsPhotoPrivacyUnlocked(true);
-      setPhotoPrivacySuccess("Verrouillage des photos desactive.");
+      setPhotoPrivacySuccess("Code PIN desactive.");
       setIsGalleryOpen(true);
+      resetPhotoPrivacyPinModal();
     } catch {
-      setPhotoPrivacyError("Impossible de desactiver le verrouillage des photos.");
+      setPhotoPrivacyError("Impossible de desactiver le code PIN des photos.");
     } finally {
       setIsPhotoPrivacyBusy(false);
     }
@@ -709,8 +798,8 @@ export function ProgressScreen({
                   photos={photos}
                   currentWeightKg={summary.currentWeightKg}
                   photoPrivacyEnabled={isPhotoPrivacyEnabled}
+                  photoPrivacySetupRequired={isPhotoPrivacySetupRequired}
                   isPhotoPrivacyUnlocked={isPhotoPrivacyUnlocked}
-                  isPhotoPrivacySupported={isPhotoPrivacySupported}
                   isPhotoPrivacyBusy={isPhotoPrivacyBusy}
                   privacyError={photoPrivacyError}
                   privacySuccess={photoPrivacySuccess}
@@ -718,15 +807,8 @@ export function ProgressScreen({
                   deletingPhotoId={deletingPhotoId}
                   uploadError={photoUploadError}
                   uploadSuccess={photoUploadSuccess}
-                  onEnableProtection={() => {
-                    void handleEnablePhotoPrivacy();
-                  }}
-                  onAddCurrentDevice={() => {
-                    void handleAddPhotoPrivacyDevice();
-                  }}
-                  onUnlockPhotos={() => {
-                    void handleUnlockPhotos();
-                  }}
+                  onEnableProtection={handleEnablePhotoPrivacy}
+                  onUnlockPhotos={handleUnlockPhotos}
                   onLockPhotos={handleLockPhotos}
                   onDisableProtection={() => {
                     void handleDisablePhotoPrivacy();
@@ -743,6 +825,20 @@ export function ProgressScreen({
           </main>
         </>
       )}
+
+      <PhotoPrivacyPinModal
+        mode={photoPrivacyPinModalMode}
+        value={photoPrivacyPinDraft}
+        error={photoPrivacyPinModalError}
+        isBusy={isPhotoPrivacyBusy}
+        onDigit={handlePhotoPrivacyPinDigit}
+        onBackspace={handlePhotoPrivacyPinBackspace}
+        onClear={handlePhotoPrivacyPinClear}
+        onSubmit={() => {
+          void handlePhotoPrivacyPinSubmit();
+        }}
+        onClose={handleClosePhotoPrivacyPinModal}
+      />
     </div>
   );
 }

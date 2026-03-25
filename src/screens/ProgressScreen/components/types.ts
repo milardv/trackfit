@@ -60,12 +60,14 @@ export interface WeightHistorySectionProps {
   deltaWeightKg: number | null;
 }
 
+export type PhotoPrivacyPinModalMode = "create" | "confirm" | "unlock";
+
 export interface ProgressPhotosSectionProps {
   photos: ProgressPhotoEntry[];
   currentWeightKg: number | null;
   photoPrivacyEnabled: boolean;
+  photoPrivacySetupRequired: boolean;
   isPhotoPrivacyUnlocked: boolean;
-  isPhotoPrivacySupported: boolean;
   isPhotoPrivacyBusy: boolean;
   privacyError: string | null;
   privacySuccess: string | null;
@@ -74,7 +76,6 @@ export interface ProgressPhotosSectionProps {
   uploadError: string | null;
   uploadSuccess: string | null;
   onEnableProtection: () => void;
-  onAddCurrentDevice: () => void;
   onUnlockPhotos: () => void;
   onLockPhotos: () => void;
   onDisableProtection: () => void;
@@ -82,4 +83,16 @@ export interface ProgressPhotosSectionProps {
   onTakePhoto: () => void;
   onOpenGallery: () => void;
   onDeletePhoto: (photoId: string) => void;
+}
+
+export interface PhotoPrivacyPinModalProps {
+  mode: PhotoPrivacyPinModalMode | null;
+  value: string;
+  error: string | null;
+  isBusy: boolean;
+  onDigit: (digit: string) => void;
+  onBackspace: () => void;
+  onClear: () => void;
+  onSubmit: () => void;
+  onClose: () => void;
 }
