@@ -45,6 +45,7 @@ export interface WorkoutPlanToStart {
   id: string;
   name: string;
   gymName: string;
+  isSharedWithFriends?: boolean;
   estimatedDurationMin: number | null;
   estimatedCaloriesKcal: number | null;
   estimationSource: EstimationSource | null;
@@ -54,5 +55,4 @@ export interface WorkoutPlanToStart {
 export interface PlanCard extends WorkoutPlanToStart {
   exerciseCount: number;
   exerciseNames: string[];
-  isSharedWithFriends?: boolean;
 }

@@ -17,6 +17,8 @@ interface WorkoutPlanCardProps {
   shareLabel?: string;
   isShareActive?: boolean;
   isShareDisabled?: boolean;
+  visibilityLabel?: string;
+  isVisibilityActive?: boolean;
 }
 
 function getGymIcon(gymName: string): "location_on" | "home_pin" {
@@ -41,6 +43,8 @@ export function WorkoutPlanCard({
   shareLabel = "RENDRE PUBLIQUE",
   isShareActive = false,
   isShareDisabled = false,
+  visibilityLabel,
+  isVisibilityActive = false,
 }: WorkoutPlanCardProps) {
   const visibleExercises = exerciseNames.slice(0, 3);
   const hiddenCount = Math.max(0, exerciseCount - visibleExercises.length);
@@ -72,6 +76,20 @@ export function WorkoutPlanCard({
             <span className="text-xs font-bold uppercase tracking-wider">{gymName}</span>
           </div>
           <h3 className="text-xl font-bold text-white">{name}</h3>
+          {visibilityLabel ? (
+            <span
+              className={`mt-2 inline-flex w-fit items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${
+                isVisibilityActive
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-white/10 bg-white/5 text-slate-300"
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm">
+                {isVisibilityActive ? "public" : "lock"}
+              </span>
+              {visibilityLabel}
+            </span>
+          ) : null}
         </div>
         <span className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-slate-100">
           {exerciseCount} exercices

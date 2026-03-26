@@ -41,6 +41,7 @@ export function CreateSessionScreen({
   const [gymName, setGymName] = useState(
     initialConfig?.gymName ?? "Keep Cool rue d'Alger",
   );
+  const [isPublic, setIsPublic] = useState(initialConfig?.isPublic ?? false);
   const [availableExercises, setAvailableExercises] = useState<ExerciseOption[]>(
     [],
   );
@@ -68,6 +69,7 @@ export function CreateSessionScreen({
     null,
   );
   const [localError, setLocalError] = useState<string | null>(null);
+  const [visibilityStatusMessage, setVisibilityStatusMessage] = useState<string | null>(null);
 
   const initialExerciseById = useMemo(() => {
     const map = new Map<string, SessionExerciseSelection>();
@@ -82,9 +84,25 @@ export function CreateSessionScreen({
   useEffect(() => {
     setName(initialConfig?.name ?? "Seance Haut du corps");
     setGymName(initialConfig?.gymName ?? "Keep Cool rue d'Alger");
+    setIsPublic(initialConfig?.isPublic ?? false);
     setSelectedExerciseIds(initialConfig?.exercises.map((exercise) => exercise.id) ?? []);
     setLocalError(null);
+    setVisibilityStatusMessage(null);
   }, [initialConfig, mode]);
+
+  useEffect(() => {
+    if (!visibilityStatusMessage) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setVisibilityStatusMessage(null);
+    }, 4200);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [visibilityStatusMessage]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -410,6 +428,7 @@ export function CreateSessionScreen({
     void onSave({
       name: trimmedName,
       gymName: gymName.trim() || "Salle",
+      isPublic,
       exercises: selectedExercises.map((exercise) => ({
         id: exercise.id,
         name: exercise.name,
@@ -423,6 +442,18 @@ export function CreateSessionScreen({
       estimatedDurationMin: sessionEstimate?.estimatedDurationMin ?? null,
       estimatedCaloriesKcal: sessionEstimate?.estimatedCaloriesKcal ?? null,
       estimationSource: sessionEstimate?.estimationSource ?? null,
+    });
+  };
+
+  const handleTogglePublicVisibility = () => {
+    setIsPublic((current) => {
+      const next = !current;
+      setVisibilityStatusMessage(
+        next
+          ? "Cette seance sera visible par tes amis apres sauvegarde."
+          : null,
+      );
+      return next;
     });
   };
 
@@ -474,6 +505,50 @@ export function CreateSessionScreen({
       </header>
 
       <main className="hide-scrollbar flex flex-1 flex-col gap-6 overflow-y-auto p-4 pb-32">
+        <section className="rounded-2xl border border-primary/15 bg-card-dark/80 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary">
+                  {isPublic ? "public" : "lock"}
+                </span>
+                <p className="text-sm font-black uppercase tracking-[0.14em] text-white">
+                  {isPublic ? "Publique" : "Privee"}
+                </p>
+              </div>
+              <p className="mt-2 text-sm text-slate-300">
+                {isPublic
+                  ? "Tes amis pourront voir cette seance dans l onglet social et la copier."
+                  : "Privee par defaut. Active le partage pour la rendre visible a tes amis."}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isPublic}
+              onClick={handleTogglePublicVisibility}
+              className={`relative flex h-9 w-16 shrink-0 items-center rounded-full border transition-colors ${
+                isPublic
+                  ? "border-primary/40 bg-primary/20"
+                  : "border-white/10 bg-white/5"
+              }`}
+            >
+              <span
+                className={`absolute h-7 w-7 rounded-full bg-white shadow-md transition-transform ${
+                  isPublic ? "translate-x-8" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
+
+          {visibilityStatusMessage ? (
+            <div className="mt-4 rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 text-sm text-primary">
+              {visibilityStatusMessage}
+            </div>
+          ) : null}
+        </section>
+
         <SessionMetaForm
           name={name}
           gymName={gymName}

@@ -29,6 +29,7 @@ export interface SessionExerciseSelection {
 export interface SessionConfig {
   name: string;
   gymName: string;
+  isPublic: boolean;
   exercises: SessionExerciseSelection[];
   estimatedDurationMin: number | null;
   estimatedCaloriesKcal: number | null;

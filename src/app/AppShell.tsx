@@ -31,6 +31,8 @@ import {
   listPlanItems,
   listSessionExerciseSets,
   listSessionExercises,
+  publishPlanForFriends,
+  unpublishPlanForFriends,
   updatePlanWithItems,
 } from "../services/firestoreService.ts";
 import type { InterruptedSessionSummary } from "../screens/HomeScreen/types.ts";
@@ -494,8 +496,17 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
 
       if (editingPlan) {
         await updatePlanWithItems(user.uid, editingPlan.id, planPayload);
+        if (config.isPublic && !editingPlan.isSharedWithFriends) {
+          await publishPlanForFriends(user.uid, editingPlan.id);
+        }
+        if (!config.isPublic && editingPlan.isSharedWithFriends) {
+          await unpublishPlanForFriends(user.uid, editingPlan.id);
+        }
       } else {
-        await createPlanWithItems(user.uid, planPayload);
+        const createdPlanId = await createPlanWithItems(user.uid, planPayload);
+        if (config.isPublic) {
+          await publishPlanForFriends(user.uid, createdPlanId);
+        }
       }
 
       setCurrentScreen("workout");
@@ -679,6 +690,7 @@ export function AppShell({ user, authError, onSignOut }: AppShellProps) {
               ? {
                   name: editingPlan.name,
                   gymName: editingPlan.gymName,
+                  isPublic: Boolean(editingPlan.isSharedWithFriends),
                   estimatedDurationMin: editingPlan.estimatedDurationMin,
                   estimatedCaloriesKcal: editingPlan.estimatedCaloriesKcal,
                   estimationSource: editingPlan.estimationSource,

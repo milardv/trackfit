@@ -8,8 +8,6 @@ import {
   listOwnSharedPlans,
   listPlanItems,
   listPlans,
-  publishPlanForFriends,
-  unpublishPlanForFriends,
   updateExercise,
 } from "../../services/firestoreService.ts";
 import {
@@ -145,9 +143,6 @@ export function WorkoutScreen({
   const [exerciseConfigErrorMessage, setExerciseConfigErrorMessage] = useState<
     string | null
   >(null);
-  const [shareProcessingPlanId, setShareProcessingPlanId] = useState<string | null>(null);
-  const [shareStatusMessage, setShareStatusMessage] = useState<string | null>(null);
-  const [shareErrorMessage, setShareErrorMessage] = useState<string | null>(null);
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -241,7 +236,6 @@ export function WorkoutScreen({
 
         if (!cancelled) {
           setPlans(planCards);
-          setShareErrorMessage(null);
         }
       } catch {
         if (!cancelled) {
@@ -301,48 +295,6 @@ export function WorkoutScreen({
     setIsExerciseConfigOpen(false);
     setEditingExercise(null);
     setExerciseConfigErrorMessage(null);
-  };
-
-  const handleTogglePlanSharing = async (plan: PlanCard): Promise<void> => {
-    if (shareProcessingPlanId) {
-      return;
-    }
-
-    setShareProcessingPlanId(plan.id);
-    setShareStatusMessage(null);
-    setShareErrorMessage(null);
-
-    try {
-      if (plan.isSharedWithFriends) {
-        await unpublishPlanForFriends(userId, plan.id);
-        setPlans((previous) =>
-          previous.map((entry) =>
-            entry.id === plan.id ? { ...entry, isSharedWithFriends: false } : entry,
-          ),
-        );
-        setShareStatusMessage(
-          `"${plan.name}" n est plus visible par tes amis.`,
-        );
-      } else {
-        await publishPlanForFriends(userId, plan.id);
-        setPlans((previous) =>
-          previous.map((entry) =>
-            entry.id === plan.id ? { ...entry, isSharedWithFriends: true } : entry,
-          ),
-        );
-        setShareStatusMessage(
-          `"${plan.name}" est maintenant visible dans l espace social de tes amis.`,
-        );
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Impossible de mettre a jour la visibilite de cette seance.";
-      setShareErrorMessage(message);
-    } finally {
-      setShareProcessingPlanId(null);
-    }
   };
 
   const handleSubmitExerciseConfig = async (config: ExerciseConfig): Promise<void> => {
@@ -470,22 +422,10 @@ export function WorkoutScreen({
               </p>
             ) : null}
 
-            {shareErrorMessage ? (
-              <p className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                {shareErrorMessage}
-              </p>
-            ) : null}
-
-            {shareStatusMessage ? (
-              <p className="rounded-xl border border-primary/25 bg-primary/10 px-4 py-3 text-sm text-primary">
-                {shareStatusMessage}
-              </p>
-            ) : null}
-
             {!isLoadingPlans && hasPlans ? (
               <div className="rounded-2xl border border-primary/15 bg-primary/10 p-4 text-sm text-slate-200">
-                Rends une seance publique depuis sa carte. Elle apparaitra ensuite dans le profil
-                de tes amis, qui pourront la copier dans leurs propres seances.
+                Ouvre une seance pour regler sa visibilite. Une seance publique apparaitra ensuite
+                dans le profil de tes amis, qui pourront la copier.
               </div>
             ) : null}
 
@@ -523,13 +463,8 @@ export function WorkoutScreen({
                     event.stopPropagation();
                     onStartPlan(plan);
                   }}
-                  onShare={(event) => {
-                    event.stopPropagation();
-                    void handleTogglePlanSharing(plan);
-                  }}
-                  shareLabel={plan.isSharedWithFriends ? "PUBLIQUE" : "PARTAGER"}
-                  isShareActive={Boolean(plan.isSharedWithFriends)}
-                  isShareDisabled={shareProcessingPlanId === plan.id || !canStart}
+                  visibilityLabel={plan.isSharedWithFriends ? "Publique" : "Privee"}
+                  isVisibilityActive={Boolean(plan.isSharedWithFriends)}
                 />
               );
             })}
